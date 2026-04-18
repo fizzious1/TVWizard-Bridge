@@ -4,6 +4,7 @@ import android.accessibilityservice.AccessibilityService
 import android.content.Context
 import android.content.Intent
 import android.media.AudioManager
+import android.net.Uri
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import kotlinx.coroutines.CoroutineScope
@@ -187,6 +188,7 @@ class TVAccessibilityService : AccessibilityService() {
         Log.i(TAG, "<- id=${frame.id} op=${frame.op} params=${frame.params}")
         val out = when (frame.op) {
             OP_KEY -> handleKey(frame)
+            OP_LAUNCH_APP -> handleLaunchApp(frame)
             else -> OutboundFrame(frame.id, ok = false, message = "unsupported op: ${frame.op}")
         }
         ws.send(encodeOutbound(out))
@@ -203,6 +205,39 @@ class TVAccessibilityService : AccessibilityService() {
             message = if (ok) "" else "could not dispatch $key",
             data = mapOf("key" to key),
         )
+    }
+
+    private fun handleLaunchApp(frame: InboundFrame): OutboundFrame {
+        val data = frame.params["data"].orEmpty()
+        if (data.isEmpty()) return OutboundFrame(frame.id, ok = false, message = "data is required")
+        val pkg = frame.params["package"].orEmpty()
+
+        val uri = try {
+            Uri.parse(data)
+        } catch (t: Throwable) {
+            return OutboundFrame(frame.id, ok = false, message = "invalid data URI: ${t.message}")
+        }
+        val intent = Intent(Intent.ACTION_VIEW, uri).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            if (pkg.isNotEmpty()) setPackage(pkg)
+        }
+        return try {
+            startActivity(intent)
+            Log.i(TAG, "launch_app data=$data package=$pkg ok=true")
+            OutboundFrame(
+                id = frame.id,
+                ok = true,
+                data = buildMap {
+                    put("data", data)
+                    if (pkg.isNotEmpty()) put("package", pkg)
+                },
+            )
+        } catch (t: Throwable) {
+            // ActivityNotFoundException (package not installed) and
+            // SecurityException (manifest queries block on API 30+) both land here.
+            Log.w(TAG, "launch_app failed data=$data package=$pkg: ${t.message}")
+            OutboundFrame(frame.id, ok = false, message = "launch failed: ${t.message}")
+        }
     }
 
     fun dispatchKey(key: String): Boolean {

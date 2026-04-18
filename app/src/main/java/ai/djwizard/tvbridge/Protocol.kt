@@ -9,6 +9,7 @@ package ai.djwizard.tvbridge
 // so the relay's Send() can resolve its waiters without hanging.
 
 const val OP_KEY = "key"
+const val OP_LAUNCH_APP = "launch_app"
 
 const val KEY_POWER = "POWER"
 const val KEY_HOME = "HOME"
