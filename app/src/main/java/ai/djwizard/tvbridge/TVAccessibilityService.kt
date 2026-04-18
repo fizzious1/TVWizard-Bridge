@@ -1,10 +1,15 @@
 package ai.djwizard.tvbridge
 
 import android.accessibilityservice.AccessibilityService
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.media.AudioManager
 import android.os.Build
+import android.provider.Settings
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
@@ -192,6 +197,7 @@ class TVAccessibilityService : AccessibilityService() {
             OP_KEY -> handleKey(frame)
             OP_LAUNCH_APP -> handleLaunchApp(frame)
             OP_LIST_APPS -> handleListApps(frame)
+            OP_OBSERVE -> handleObserve(frame)
             else -> OutboundFrame(frame.id, ok = false, message = "unsupported op: ${frame.op}")
         }
         ws.send(encodeOutbound(out))
@@ -284,6 +290,163 @@ class TVAccessibilityService : AccessibilityService() {
             // SecurityException (manifest queries block on API 30+) both land here.
             Log.w(TAG, "launch_app failed data=$data package=$pkg: ${t.message}")
             OutboundFrame(frame.id, ok = false, message = "launch failed: ${t.message}")
+        }
+    }
+
+    // handleObserve returns a flattened, capped snapshot of what's on the
+    // active window right now — enough for Claude to decide the next key
+    // press or deep link without re-serializing the whole AccessibilityNode
+    // tree (which can run into megabytes on streaming apps).
+    //
+    // Wire contract pinned in TVWizard/docs/adr/0003-observe-wire-contract.md.
+    // Snapshot shape mirrors the relay's observeSnapshot struct — keep in
+    // sync on both sides or the relay will reject the payload as "malformed
+    // observe payload".
+    private fun handleObserve(frame: InboundFrame): OutboundFrame {
+        val root = rootInActiveWindow
+        if (root == null) {
+            // The AccessibilityService is bound but can't read the active
+            // window. Most common cause is Android 13+ "restricted settings"
+            // blocking sideloaded accessibility services from seeing window
+            // content until the user explicitly allows it. Nudge the user
+            // with a TV-facing notification and surface the exact error code
+            // the relay handler is matching on.
+            postAccessibilityNotification()
+            return OutboundFrame(frame.id, ok = false, message = ERR_ACCESSIBILITY_NOT_GRANTED)
+        }
+        return try {
+            val snapshot = buildObserveSnapshot(root)
+            OutboundFrame(
+                id = frame.id,
+                ok = true,
+                data = mapOf("observe_json" to snapshot),
+            )
+        } catch (t: Throwable) {
+            Log.w(TAG, "observe failed: ${t.message}")
+            OutboundFrame(frame.id, ok = false, message = "observe failed: ${t.message}")
+        } finally {
+            root.recycle()
+        }
+    }
+
+    // NodeSnap is a POJO copy of the bits of an AccessibilityNodeInfo we
+    // actually ship. Using it frees us from holding onto live Node refs
+    // across the tree walk — every Node we touch is recycled immediately.
+    private data class NodeSnap(val text: String, val desc: String, val clickable: Boolean)
+
+    // maxVisibleNodes caps the snapshot per ADR-0003. 50 is enough for any
+    // reasonable streaming-app screen; truncating at that point keeps Claude
+    // within a sane token budget.
+    private val maxVisibleNodes: Int = 50
+
+    private fun buildObserveSnapshot(root: AccessibilityNodeInfo): String {
+        val obj = org.json.JSONObject()
+        obj.put("package", root.packageName?.toString() ?: "")
+        // activity is best-effort — AccessibilityNodeInfo.className on the
+        // root usually carries the top Activity's class name. Devices that
+        // don't surface it leave this as "".
+        obj.put("activity", root.className?.toString() ?: "")
+
+        val focusedObj = org.json.JSONObject()
+        val focused = root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
+            ?: root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+        if (focused != null) {
+            val t = focused.text?.toString().orEmpty()
+            val d = focused.contentDescription?.toString().orEmpty()
+            if (t.isNotEmpty()) focusedObj.put("text", t)
+            if (d.isNotEmpty()) focusedObj.put("content_description", d)
+            focused.recycle()
+        }
+        obj.put("focused", focusedObj)
+
+        val collected = mutableListOf<NodeSnap>()
+        // Collect one extra so we know whether truncation is needed.
+        collectVisible(root, collected, maxVisibleNodes + 1)
+
+        val truncated = collected.size > maxVisibleNodes
+        val emit = if (truncated) collected.subList(0, maxVisibleNodes) else collected
+        val arr = JSONArray()
+        for (snap in emit) {
+            val n = org.json.JSONObject()
+            if (snap.text.isNotEmpty()) n.put("text", snap.text)
+            if (snap.desc.isNotEmpty()) n.put("content_description", snap.desc)
+            n.put("clickable", snap.clickable)
+            arr.put(n)
+        }
+        if (truncated) {
+            val marker = org.json.JSONObject()
+            marker.put("text", "… (${collected.size - maxVisibleNodes} more)")
+            marker.put("clickable", false)
+            arr.put(marker)
+        }
+        obj.put("visible", arr)
+        return obj.toString()
+    }
+
+    // collectVisible DFS-walks the accessibility tree and copies nodes with
+    // user-visible text or content description into `out`. Each Node it
+    // touches is recycled on the way out. Stops growing `out` once `cap` is
+    // hit — we still descend to ensure recycling, but don't emit more rows.
+    private fun collectVisible(node: AccessibilityNodeInfo, out: MutableList<NodeSnap>, cap: Int) {
+        if (out.size < cap) {
+            val text = node.text?.toString().orEmpty()
+            val desc = node.contentDescription?.toString().orEmpty()
+            if (text.isNotEmpty() || desc.isNotEmpty()) {
+                out.add(NodeSnap(text, desc, node.isClickable))
+            }
+        }
+        for (i in 0 until node.childCount) {
+            val child = node.getChild(i) ?: continue
+            try {
+                collectVisible(child, out, cap)
+            } finally {
+                child.recycle()
+            }
+        }
+    }
+
+    // notificationChannelId is a module-level constant because posting more
+    // than one variant confuses the settings UI.
+    private val notificationChannelId: String = "tvwizard_setup"
+    private val accessibilitySetupNotificationId: Int = 1001
+
+    // postAccessibilityNotification is the ADR-0003 "auto-surface a setup
+    // prompt on the TV" flow. In practice this fires when the service is
+    // bound but rootInActiveWindow returned null — most commonly Android
+    // 13's restricted-settings gate on sideloaded accessibility services.
+    private fun postAccessibilityNotification() {
+        try {
+            val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val channel = NotificationChannel(
+                    notificationChannelId,
+                    "TVWizard setup",
+                    NotificationManager.IMPORTANCE_HIGH,
+                )
+                nm.createNotificationChannel(channel)
+            }
+            val settings = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            val pending = PendingIntent.getActivity(
+                this,
+                0,
+                settings,
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+            )
+            val notification = Notification.Builder(this, notificationChannelId)
+                .setSmallIcon(R.drawable.bridge_banner)
+                .setContentTitle("Finish TVWizard setup")
+                .setContentText("Tap to let TVWizard read the screen.")
+                .setContentIntent(pending)
+                .setAutoCancel(true)
+                .build()
+            nm.notify(accessibilitySetupNotificationId, notification)
+            Log.i(TAG, "posted accessibility-not-granted notification")
+        } catch (t: Throwable) {
+            // Notifications can fail if the channel post-permission is
+            // revoked (Android 13+ POST_NOTIFICATIONS). Not fatal — we still
+            // return the accessibility_not_granted error to the relay.
+            Log.w(TAG, "could not post setup notification: ${t.message}")
         }
     }
 

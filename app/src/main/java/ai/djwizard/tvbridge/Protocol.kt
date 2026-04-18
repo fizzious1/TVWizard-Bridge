@@ -11,6 +11,12 @@ package ai.djwizard.tvbridge
 const val OP_KEY = "key"
 const val OP_LAUNCH_APP = "launch_app"
 const val OP_LIST_APPS = "list_apps"
+const val OP_OBSERVE = "observe"
+
+// ERR_ACCESSIBILITY_NOT_GRANTED is the exact string the relay's
+// makeObserveHandler matches to tell Claude "a setup prompt was just
+// posted on the TV". Do NOT change without updating the relay in lockstep.
+const val ERR_ACCESSIBILITY_NOT_GRANTED = "accessibility_not_granted"
 
 const val KEY_POWER = "POWER"
 const val KEY_HOME = "HOME"
