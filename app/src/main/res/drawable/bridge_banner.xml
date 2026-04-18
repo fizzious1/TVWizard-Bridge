@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Leanback banner. Android TV launchers show this at 320×180 on the home row.
+  Kept as a vector drawable so we don't ship PNGs for different densities.
+
+  Design: black plate, orange accent stripe, simple TV letterforms that read
+  at thumbnail size on the launcher grid.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="320dp"
+    android:height="180dp"
+    android:viewportWidth="320"
+    android:viewportHeight="180">
+
+    <!-- background -->
+    <path android:fillColor="#0A0A0A"
+        android:pathData="M0,0 H320 V180 H0 Z" />
+
+    <!-- top accent -->
+    <path android:fillColor="#FF9800"
+        android:pathData="M0,0 H320 V6 H0 Z" />
+
+    <!-- "T" letter -->
+    <path android:fillColor="#FFFFFF"
+        android:pathData="M70,56 H136 V70 H70 Z" />
+    <path android:fillColor="#FFFFFF"
+        android:pathData="M97,56 H109 V128 H97 Z" />
+
+    <!-- "V" letter -->
+    <path android:fillColor="#FFFFFF"
+        android:pathData="M146,56 L158,56 L174,112 L190,56 L202,56 L181,128 L167,128 Z" />
+
+    <!-- subtle label underline -->
+    <path android:fillColor="#FF9800"
+        android:pathData="M70,138 H202 V142 H70 Z" />
+
+    <!-- small dot matrix — reads as signal/wireless at thumbnail size -->
+    <path android:fillColor="#BDBDBD"
+        android:pathData="M232,64 h8 v8 h-8 z M248,64 h8 v8 h-8 z M264,64 h8 v8 h-8 z
+                          M232,80 h8 v8 h-8 z M248,80 h8 v8 h-8 z
+                          M232,96 h8 v8 h-8 z" />
+</vector>

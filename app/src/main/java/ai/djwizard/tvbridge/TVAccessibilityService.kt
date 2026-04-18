@@ -12,7 +12,11 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -24,36 +28,43 @@ import java.util.concurrent.TimeUnit
 
 // The AccessibilityService is already a long-lived, system-managed component —
 // it stays bound as long as the user leaves the toggle on. We give it the
-// WebSocket too, which avoids Android 14's FGS-type permission matrix and
-// keeps the app to one owner of the network + one owner of key dispatch.
+// WebSocket too, plus pairing, plus state. One owner for everything network
+// and key-related.
 class TVAccessibilityService : AccessibilityService() {
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var wsJob: Job? = null
+    private var pairJob: Job? = null
     private var webSocket: WebSocket? = null
 
-    // No OkHttp ping interval — Caddy's reverse_proxy doesn't forward WebSocket
-    // ping frames reliably, and TCP keepalive plus the relay's 5s command
-    // timeout covers liveness. Inactive bridges are cheap for the relay to hold.
+    private lateinit var config: ConfigStore
+
     private val client: OkHttpClient by lazy {
+        // No pingInterval — Caddy's reverse_proxy drops WS control frames.
+        // TCP keepalive + the relay's command timeout cover liveness.
         OkHttpClient.Builder()
             .readTimeout(0, TimeUnit.SECONDS)
             .build()
     }
 
+    override fun onCreate() {
+        super.onCreate()
+        config = ConfigStore(applicationContext)
+    }
+
     override fun onServiceConnected() {
         super.onServiceConnected()
-        Log.i(TAG, "accessibility service connected, starting ws loop")
+        Log.i(TAG, "accessibility service connected")
         instance = this
-        if (wsJob?.isActive != true) {
-            wsJob = scope.launch { runLoop() }
-        }
+        startOrContinuePairing()
     }
 
     override fun onUnbind(intent: Intent?): Boolean {
-        Log.i(TAG, "accessibility service unbound, stopping ws loop")
+        Log.i(TAG, "accessibility service unbound")
         wsJob?.cancel()
+        pairJob?.cancel()
         webSocket?.close(1000, "service unbound")
+        stateSink.value = BridgeState.AwaitingAccessibility
         if (instance === this) instance = null
         return super.onUnbind(intent)
     }
@@ -66,70 +77,105 @@ class TVAccessibilityService : AccessibilityService() {
     override fun onAccessibilityEvent(event: AccessibilityEvent?) { /* no-op */ }
     override fun onInterrupt() { /* no-op */ }
 
-    fun dispatchKey(key: String): Boolean {
-        val action = mapKey(key)
-        return when (action) {
-            is KeyAction.Global -> {
-                val ok = performGlobalAction(action.globalAction)
-                Log.i(TAG, "dispatchKey key=$key global=${action.globalAction} ok=$ok")
-                ok
-            }
-            is KeyAction.Volume -> {
-                val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
-                val dir = if (action.direction > 0) AudioManager.ADJUST_RAISE else AudioManager.ADJUST_LOWER
-                am.adjustStreamVolume(AudioManager.STREAM_MUSIC, dir, AudioManager.FLAG_SHOW_UI)
-                Log.i(TAG, "dispatchKey key=$key volume direction=${action.direction} ok=true")
-                true
-            }
-            KeyAction.Unsupported -> {
-                Log.w(TAG, "dispatchKey key=$key unsupported")
-                false
+    // Kicks off pairing or the WebSocket loop depending on what's in storage.
+    // Called on service bind; the MainActivity can also trigger pairing
+    // explicitly (via beginPairing()) after the user wipes state.
+    private fun startOrContinuePairing() {
+        val token = config.token
+        if (token.isBlank()) {
+            beginPairing()
+        } else {
+            stateSink.value = BridgeState.Connecting
+            startWsLoop()
+        }
+    }
+
+    fun beginPairing() {
+        pairJob?.cancel()
+        wsJob?.cancel()
+        webSocket?.close(1000, "repairing")
+        stateSink.value = BridgeState.NeedsPairing
+        pairJob = scope.launch {
+            val relay = RelayClient(BuildConfig.RELAY_URL)
+            var backoffMs = 2_000L
+            while (scope.coroutineContext[Job]?.isActive == true) {
+                val result = runCatching { withContext(Dispatchers.IO) { relay.pairInit() } }
+                result.fold(
+                    onSuccess = { r ->
+                        Log.i(TAG, "pair/init code=${r.code} token=***")
+                        config.token = r.token
+                        config.pendingPairCode = r.code
+                        stateSink.value = BridgeState.Pairing(r.code)
+                        // Once we have a token, start the WS loop — it will
+                        // reject until the code is claimed, then succeed.
+                        startWsLoop()
+                        return@launch
+                    },
+                    onFailure = { t ->
+                        Log.w(TAG, "pair/init failed: ${t.message}")
+                        stateSink.value = BridgeState.Error("pair/init: ${t.message}")
+                        delay(backoffMs)
+                        backoffMs = (backoffMs * 2).coerceAtMost(30_000)
+                    },
+                )
             }
         }
     }
 
-    // runLoop reconnects the WebSocket with exponential backoff. Every inbound
-    // frame is acked so the relay's Send() can resolve its waiters.
-    private suspend fun runLoop() {
-        var backoffMs = 1_000L
-        while (scope.coroutineContext[Job]?.isActive == true) {
-            val token = BuildConfig.BRIDGE_TOKEN
-            if (token.isBlank()) {
-                Log.w(TAG, "no BRIDGE_TOKEN configured; sleeping")
-                delay(30_000)
-                continue
+    private fun startWsLoop() {
+        if (wsJob?.isActive == true) return
+        wsJob = scope.launch {
+            var backoffMs = 1_000L
+            while (scope.coroutineContext[Job]?.isActive == true) {
+                val token = config.token
+                if (token.isBlank()) {
+                    stateSink.value = BridgeState.NeedsPairing
+                    return@launch
+                }
+                val wsUrl = toWs(BuildConfig.RELAY_URL) + "/bridge"
+                val req = Request.Builder()
+                    .url(wsUrl)
+                    .header("Authorization", "Bearer $token")
+                    .build()
+                val pendingCode = config.pendingPairCode
+                stateSink.value = if (pendingCode != null) BridgeState.Pairing(pendingCode) else BridgeState.Connecting
+                Log.i(TAG, "dialing $wsUrl")
+                val latch = kotlinx.coroutines.CompletableDeferred<Unit>()
+                val ws = client.newWebSocket(req, object : WebSocketListener() {
+                    override fun onOpen(webSocket: WebSocket, response: Response) {
+                        Log.i(TAG, "ws open status=${response.code}")
+                        backoffMs = 1_000L
+                        config.pendingPairCode = null
+                        stateSink.value = BridgeState.Online
+                    }
+                    override fun onMessage(webSocket: WebSocket, text: String) = handleFrame(webSocket, text)
+                    override fun onMessage(webSocket: WebSocket, bytes: ByteString) = handleFrame(webSocket, bytes.utf8())
+                    override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+                        Log.i(TAG, "ws closing code=$code reason=$reason")
+                        webSocket.close(code, reason)
+                    }
+                    override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                        // 401 is the expected response while a pair code is
+                        // awaiting claim — the token exists but isn't yet
+                        // bound to a device_id. Keep retrying; the user
+                        // clears state explicitly via the Reset button.
+                        Log.w(TAG, "ws failure: ${t.message} status=${response?.code}")
+                        latch.complete(Unit)
+                    }
+                    override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                        Log.i(TAG, "ws closed code=$code reason=$reason")
+                        latch.complete(Unit)
+                    }
+                })
+                webSocket = ws
+                latch.await()
+                // While pairing is pending, poll faster so claim transitions
+                // to Online feel instant; once online-and-dropped, backoff.
+                val pendingNow = config.pendingPairCode != null
+                val sleep = if (pendingNow) 2_000L else backoffMs
+                delay(sleep)
+                if (!pendingNow) backoffMs = (backoffMs * 2).coerceAtMost(30_000)
             }
-            val wsUrl = toWs(BuildConfig.RELAY_URL) + "/bridge"
-            val req = Request.Builder()
-                .url(wsUrl)
-                .header("Authorization", "Bearer $token")
-                .build()
-            Log.i(TAG, "dialing $wsUrl as ${BuildConfig.DEVICE_ID}")
-            val latch = kotlinx.coroutines.CompletableDeferred<Unit>()
-            val ws = client.newWebSocket(req, object : WebSocketListener() {
-                override fun onOpen(webSocket: WebSocket, response: Response) {
-                    Log.i(TAG, "ws open status=${response.code}")
-                    backoffMs = 1_000L
-                }
-                override fun onMessage(webSocket: WebSocket, text: String) = handleFrame(webSocket, text)
-                override fun onMessage(webSocket: WebSocket, bytes: ByteString) = handleFrame(webSocket, bytes.utf8())
-                override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
-                    Log.i(TAG, "ws closing code=$code reason=$reason")
-                    webSocket.close(code, reason)
-                }
-                override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                    Log.w(TAG, "ws failure: ${t.message} status=${response?.code}")
-                    latch.complete(Unit)
-                }
-                override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                    Log.i(TAG, "ws closed code=$code reason=$reason")
-                    latch.complete(Unit)
-                }
-            })
-            webSocket = ws
-            latch.await()
-            delay(backoffMs)
-            backoffMs = (backoffMs * 2).coerceAtMost(30_000)
         }
     }
 
@@ -155,8 +201,30 @@ class TVAccessibilityService : AccessibilityService() {
             id = frame.id,
             ok = ok,
             message = if (ok) "" else "could not dispatch $key",
-            data = mapOf("key" to key, "device_id" to BuildConfig.DEVICE_ID),
+            data = mapOf("key" to key),
         )
+    }
+
+    fun dispatchKey(key: String): Boolean {
+        val action = mapKey(key)
+        return when (action) {
+            is KeyAction.Global -> {
+                val ok = performGlobalAction(action.globalAction)
+                Log.i(TAG, "dispatchKey key=$key global=${action.globalAction} ok=$ok")
+                ok
+            }
+            is KeyAction.Volume -> {
+                val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+                val dir = if (action.direction > 0) AudioManager.ADJUST_RAISE else AudioManager.ADJUST_LOWER
+                am.adjustStreamVolume(AudioManager.STREAM_MUSIC, dir, AudioManager.FLAG_SHOW_UI)
+                Log.i(TAG, "dispatchKey key=$key volume direction=${action.direction} ok=true")
+                true
+            }
+            KeyAction.Unsupported -> {
+                Log.w(TAG, "dispatchKey key=$key unsupported")
+                false
+            }
+        }
     }
 
     companion object {
@@ -166,6 +234,12 @@ class TVAccessibilityService : AccessibilityService() {
 
         fun isEnabled(): Boolean = instance != null
         fun get(): TVAccessibilityService? = instance
+
+        // Single process-wide state stream. The service owns writes; the UI
+        // observes. When the service unbinds (user disables accessibility),
+        // we emit AwaitingAccessibility so the UI snaps back.
+        private val stateSink = MutableStateFlow<BridgeState>(BridgeState.AwaitingAccessibility)
+        val state: StateFlow<BridgeState> = stateSink.asStateFlow()
     }
 }
 

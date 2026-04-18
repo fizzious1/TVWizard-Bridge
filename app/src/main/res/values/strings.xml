@@ -3,13 +3,23 @@
     <string name="app_name">TVWizard Bridge</string>
     <string name="accessibility_label">TVWizard Bridge Controller</string>
     <string name="accessibility_description">Lets Claude control this TV by dispatching key events when commands arrive from the TVWizard relay.</string>
-    <string name="title_offline">TVWizard Bridge — offline</string>
-    <string name="title_connecting">Connecting to relay…</string>
-    <string name="title_online">Online — controlling as %1$s</string>
-    <string name="title_no_token">No token configured. Rebuild with -PbridgeToken=…</string>
-    <string name="enable_accessibility">Enable accessibility service to control the TV</string>
-    <string name="accessibility_ok">Accessibility service enabled</string>
-    <string name="notification_channel">TVWizard Bridge</string>
-    <string name="notification_title">TVWizard Bridge</string>
-    <string name="notification_text">%1$s</string>
+
+    <!-- Titles for each bridge state -->
+    <string name="title_awaiting_accessibility">Enable accessibility to continue</string>
+    <string name="title_pairing">Pair this TV with Claude</string>
+    <string name="title_connecting">Connecting…</string>
+    <string name="title_online">Online — ready for commands</string>
+    <string name="title_error">Could not reach relay</string>
+
+    <!-- Secondary status text -->
+    <string name="status_awaiting_accessibility">Open Accessibility Settings → TVWizard Bridge and turn it on.</string>
+    <string name="status_connecting">Waiting for relay handshake — this retries automatically.</string>
+    <string name="status_online">Commands from Claude will land on this TV.</string>
+
+    <!-- Pairing instruction -->
+    <string name="pair_instructions">Tell Claude: "pair my TV with code {{code}} and call it living-room"\n(or any name you want)</string>
+
+    <!-- Buttons -->
+    <string name="btn_open_accessibility">Open Accessibility Settings</string>
+    <string name="btn_reset_pairing">Reset pairing</string>
 </resources>

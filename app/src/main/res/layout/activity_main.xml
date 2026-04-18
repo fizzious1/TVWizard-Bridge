@@ -1,42 +1,65 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
     android:gravity="center"
-    android:padding="48dp"
+    android:padding="64dp"
     android:background="@android:color/black">
 
     <TextView
         android:id="@+id/titleText"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="@string/title_offline"
         android:textColor="@android:color/white"
         android:textSize="36sp"
-        android:textStyle="bold" />
+        android:textStyle="bold"
+        tools:text="Enable accessibility to continue" />
+
+    <TextView
+        android:id="@+id/pairCodeText"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="24dp"
+        android:letterSpacing="0.2"
+        android:textColor="@android:color/holo_orange_light"
+        android:textSize="96sp"
+        android:textStyle="bold"
+        android:visibility="gone"
+        tools:text="562721" />
+
+    <TextView
+        android:id="@+id/pairInstructions"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        android:gravity="center"
+        android:textColor="@android:color/white"
+        android:textSize="18sp"
+        android:visibility="gone"
+        android:text="@string/pair_instructions" />
 
     <TextView
         android:id="@+id/statusText"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_marginTop="24dp"
+        android:gravity="center"
         android:textColor="@android:color/white"
-        android:textSize="20sp" />
-
-    <TextView
-        android:id="@+id/accessibilityText"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="48dp"
-        android:text="@string/enable_accessibility"
-        android:textColor="@android:color/holo_orange_light"
         android:textSize="18sp" />
 
     <Button
-        android:id="@+id/openAccessibilitySettings"
+        android:id="@+id/primaryButton"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginTop="16dp"
-        android:text="Open Accessibility Settings" />
+        android:layout_marginTop="32dp"
+        android:text="@string/btn_open_accessibility" />
+
+    <Button
+        android:id="@+id/resetButton"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:text="@string/btn_reset_pairing" />
 </LinearLayout>
