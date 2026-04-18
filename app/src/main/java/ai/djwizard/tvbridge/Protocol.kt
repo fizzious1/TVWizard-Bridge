@@ -10,6 +10,7 @@ package ai.djwizard.tvbridge
 
 const val OP_KEY = "key"
 const val OP_LAUNCH_APP = "launch_app"
+const val OP_LIST_APPS = "list_apps"
 
 const val KEY_POWER = "POWER"
 const val KEY_HOME = "HOME"

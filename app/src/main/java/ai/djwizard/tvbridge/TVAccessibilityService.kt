@@ -5,8 +5,11 @@ import android.content.Context
 import android.content.Intent
 import android.media.AudioManager
 import android.net.Uri
+import android.os.Build
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
+import android.view.accessibility.AccessibilityNodeInfo
+import org.json.JSONArray
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -189,6 +192,7 @@ class TVAccessibilityService : AccessibilityService() {
         val out = when (frame.op) {
             OP_KEY -> handleKey(frame)
             OP_LAUNCH_APP -> handleLaunchApp(frame)
+            OP_LIST_APPS -> handleListApps(frame)
             else -> OutboundFrame(frame.id, ok = false, message = "unsupported op: ${frame.op}")
         }
         ws.send(encodeOutbound(out))
@@ -204,6 +208,46 @@ class TVAccessibilityService : AccessibilityService() {
             ok = ok,
             message = if (ok) "" else "could not dispatch $key",
             data = mapOf("key" to key),
+        )
+    }
+
+    // handleListApps enumerates apps that appear on the Android TV launcher
+    // (LEANBACK_LAUNCHER) plus standard LAUNCHER apps, deduped by package,
+    // sorted by label. Packs them as a JSON string in data["apps_json"] so
+    // the relay can forward them as structured output to Claude without
+    // needing a protocol widening for list-typed Data fields.
+    private fun handleListApps(frame: InboundFrame): OutboundFrame {
+        val pm = packageManager
+        val tvIntent = Intent(Intent.ACTION_MAIN).addCategory("android.intent.category.LEANBACK_LAUNCHER")
+        val mobileIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+
+        val seen = mutableSetOf<String>()
+        val rows = mutableListOf<Triple<String, String, Boolean>>() // pkg, label, leanback
+        for (info in pm.queryIntentActivities(tvIntent, 0)) {
+            val pkg = info.activityInfo.packageName
+            if (!seen.add(pkg)) continue
+            rows += Triple(pkg, info.loadLabel(pm).toString(), true)
+        }
+        for (info in pm.queryIntentActivities(mobileIntent, 0)) {
+            val pkg = info.activityInfo.packageName
+            if (!seen.add(pkg)) continue
+            rows += Triple(pkg, info.loadLabel(pm).toString(), false)
+        }
+        rows.sortBy { it.second.lowercase() }
+
+        val arr = JSONArray()
+        for ((pkg, label, leanback) in rows) {
+            val entry = org.json.JSONObject()
+            entry.put("package", pkg)
+            entry.put("label", label)
+            entry.put("leanback", leanback)
+            arr.put(entry)
+        }
+        Log.i(TAG, "list_apps returning ${rows.size} apps")
+        return OutboundFrame(
+            id = frame.id,
+            ok = true,
+            data = mapOf("apps_json" to arr.toString()),
         )
     }
 
@@ -255,11 +299,96 @@ class TVAccessibilityService : AccessibilityService() {
                 Log.i(TAG, "dispatchKey key=$key volume direction=${action.direction} ok=true")
                 true
             }
+            is KeyAction.Dpad -> dispatchDpad(key, action.direction)
+            KeyAction.Select -> dispatchSelect(key)
             KeyAction.Unsupported -> {
                 Log.w(TAG, "dispatchKey key=$key unsupported")
                 false
             }
         }
+    }
+
+    // dispatchDpad: API-33+ has proper GLOBAL_ACTION_DPAD_* that fire real
+    // key events into the focused window. Below that, the best an
+    // AccessibilityService can do without INJECT_EVENTS is to find the
+    // focused node's nearest scrollable ancestor and ask it to scroll in
+    // the requested direction. This covers list/grid navigation in apps
+    // that expose scrollable AccessibilityNodeInfos (YouTube, most TV
+    // launchers); it won't work in apps that handle DPAD purely via
+    // onKeyDown without exposing scroll actions.
+    private fun dispatchDpad(key: String, dir: DpadDirection): Boolean {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val global = when (dir) {
+                DpadDirection.UP -> AccessibilityService.GLOBAL_ACTION_DPAD_UP
+                DpadDirection.DOWN -> AccessibilityService.GLOBAL_ACTION_DPAD_DOWN
+                DpadDirection.LEFT -> AccessibilityService.GLOBAL_ACTION_DPAD_LEFT
+                DpadDirection.RIGHT -> AccessibilityService.GLOBAL_ACTION_DPAD_RIGHT
+            }
+            if (performGlobalAction(global)) {
+                Log.i(TAG, "dispatchKey key=$key global-dpad ok=true")
+                return true
+            }
+        }
+        // Pre-API-33 fallback: walk up from the focused node to a scrollable
+        // ancestor and fire a directional scroll.
+        val root = rootInActiveWindow ?: run {
+            Log.w(TAG, "dispatchKey key=$key no root window")
+            return false
+        }
+        val focused = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+            ?: root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
+        val scrollable = findScrollableAncestor(focused)
+            ?: findFirstScrollable(root)
+        if (scrollable == null) {
+            Log.w(TAG, "dispatchKey key=$key no scrollable node found")
+            return false
+        }
+        val scrollAction = when (dir) {
+            DpadDirection.UP -> AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD
+            DpadDirection.DOWN -> AccessibilityNodeInfo.ACTION_SCROLL_FORWARD
+            DpadDirection.LEFT -> AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD
+            DpadDirection.RIGHT -> AccessibilityNodeInfo.ACTION_SCROLL_FORWARD
+        }
+        val ok = scrollable.performAction(scrollAction)
+        Log.i(TAG, "dispatchKey key=$key scroll=$scrollAction ok=$ok scrollable=${scrollable.className}")
+        return ok
+    }
+
+    private fun dispatchSelect(key: String): Boolean {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val ok = performGlobalAction(AccessibilityService.GLOBAL_ACTION_DPAD_CENTER)
+            if (ok) {
+                Log.i(TAG, "dispatchKey key=$key dpad-center ok=true")
+                return true
+            }
+        }
+        val root = rootInActiveWindow ?: return false
+        val focused = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+            ?: root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
+            ?: return false
+        val ok = focused.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+        Log.i(TAG, "dispatchKey key=$key click ok=$ok target=${focused.className}")
+        return ok
+    }
+
+    private fun findScrollableAncestor(start: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
+        var cur = start
+        while (cur != null) {
+            if (cur.isScrollable) return cur
+            cur = cur.parent
+        }
+        return null
+    }
+
+    private fun findFirstScrollable(root: AccessibilityNodeInfo): AccessibilityNodeInfo? {
+        // Breadth-ish depth-first walk; most TV UIs have a scrollable near
+        // the top of the tree, so this terminates fast.
+        if (root.isScrollable) return root
+        for (i in 0 until root.childCount) {
+            val child = root.getChild(i) ?: continue
+            findFirstScrollable(child)?.let { return it }
+        }
+        return null
     }
 
     companion object {
