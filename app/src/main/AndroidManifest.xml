@@ -13,6 +13,7 @@
          via tv.launch_app so startActivity() with setPackage() works against
          installed third-party apps. -->
     <queries>
+        <!-- tv.launch_app dispatches -->
         <intent>
             <action android:name="android.intent.action.VIEW" />
             <data android:scheme="https" />
@@ -23,6 +24,15 @@
         </intent>
         <intent>
             <action android:name="android.intent.action.VIEW" />
+        </intent>
+        <!-- tv.list_apps enumeration -->
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
         </intent>
     </queries>
 
