@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">TVWizard Bridge</string>
+    <string name="accessibility_label">TVWizard Bridge Controller</string>
+    <string name="accessibility_description">Lets Claude control this TV by dispatching key events when commands arrive from the TVWizard relay.</string>
+    <string name="title_offline">TVWizard Bridge — offline</string>
+    <string name="title_connecting">Connecting to relay…</string>
+    <string name="title_online">Online — controlling as %1$s</string>
+    <string name="title_no_token">No token configured. Rebuild with -PbridgeToken=…</string>
+    <string name="enable_accessibility">Enable accessibility service to control the TV</string>
+    <string name="accessibility_ok">Accessibility service enabled</string>
+    <string name="notification_channel">TVWizard Bridge</string>
+    <string name="notification_title">TVWizard Bridge</string>
+    <string name="notification_text">%1$s</string>
+</resources>
