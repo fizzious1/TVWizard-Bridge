@@ -4,7 +4,6 @@ import android.accessibilityservice.AccessibilityService
 import android.content.Context
 import android.content.Intent
 import android.media.AudioManager
-import android.net.Uri
 import android.os.Build
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
@@ -251,15 +250,24 @@ class TVAccessibilityService : AccessibilityService() {
         if (data.isEmpty()) return OutboundFrame(frame.id, ok = false, message = "data is required")
         val pkg = frame.params["package"].orEmpty()
 
-        val uri = try {
-            Uri.parse(data)
+        // URI_INTENT_SCHEME lets parseUri honor the full `intent://host/path#Intent;
+        // key=value;...;end` form that JustWatch's Android-TV deep links use — the
+        // `S.source=30` extra on Netflix, `package=com.hulu.livingroomplus` + custom
+        // action on Hulu, launchFlags, everything. For a plain https:// or custom-
+        // scheme URI, parseUri falls back to an ACTION_VIEW intent — same shape as
+        // the old Intent(ACTION_VIEW, Uri.parse(...)) path it replaces.
+        val intent = try {
+            Intent.parseUri(data, Intent.URI_INTENT_SCHEME)
         } catch (t: Throwable) {
             return OutboundFrame(frame.id, ok = false, message = "invalid data URI: ${t.message}")
         }
-        val intent = Intent(Intent.ACTION_VIEW, uri).apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            if (pkg.isNotEmpty()) setPackage(pkg)
-        }
+        // Required when launching from a background service (AccessibilityService).
+        // OR'd on top of any launchFlags= the intent URI already carried.
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        // Caller-supplied package wins over any package=... the intent URI parsed —
+        // the MCP caller has the final say on which app handles the intent.
+        if (pkg.isNotEmpty()) intent.setPackage(pkg)
+
         return try {
             startActivity(intent)
             Log.i(TAG, "launch_app data=$data package=$pkg ok=true")
