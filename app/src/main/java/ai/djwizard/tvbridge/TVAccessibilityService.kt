@@ -211,29 +211,24 @@ class TVAccessibilityService : AccessibilityService() {
         )
     }
 
-    // handleListApps enumerates apps that appear on the Android TV launcher
-    // (LEANBACK_LAUNCHER) plus standard LAUNCHER apps, deduped by package,
-    // sorted by label. Packs them as a JSON string in data["apps_json"] so
-    // the relay can forward them as structured output to Claude without
-    // needing a protocol widening for list-typed Data fields.
+    // handleListApps enumerates launchable apps on the TV. Uses
+    // getInstalledApplications + getLeanbackLaunchIntentForPackage rather
+    // than pm.queryIntentActivities because the latter's default filter
+    // flags drop many LEANBACK activities. Requires QUERY_ALL_PACKAGES on
+    // Android 11+ to see past the package-visibility sandbox.
     private fun handleListApps(frame: InboundFrame): OutboundFrame {
         val pm = packageManager
-        val tvIntent = Intent(Intent.ACTION_MAIN).addCategory("android.intent.category.LEANBACK_LAUNCHER")
-        val mobileIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
-
-        val seen = mutableSetOf<String>()
+        val installed = pm.getInstalledApplications(0)
         val rows = mutableListOf<Triple<String, String, Boolean>>() // pkg, label, leanback
-        for (info in pm.queryIntentActivities(tvIntent, 0)) {
-            val pkg = info.activityInfo.packageName
-            if (!seen.add(pkg)) continue
-            rows += Triple(pkg, info.loadLabel(pm).toString(), true)
+        for (app in installed) {
+            if (!app.enabled) continue
+            val leanbackIntent = pm.getLeanbackLaunchIntentForPackage(app.packageName)
+            val mobileIntent = pm.getLaunchIntentForPackage(app.packageName)
+            if (leanbackIntent == null && mobileIntent == null) continue
+            val label = pm.getApplicationLabel(app).toString()
+            rows += Triple(app.packageName, label, leanbackIntent != null)
         }
-        for (info in pm.queryIntentActivities(mobileIntent, 0)) {
-            val pkg = info.activityInfo.packageName
-            if (!seen.add(pkg)) continue
-            rows += Triple(pkg, info.loadLabel(pm).toString(), false)
-        }
-        rows.sortBy { it.second.lowercase() }
+        rows.sortWith(compareByDescending<Triple<String, String, Boolean>> { it.third }.thenBy { it.second.lowercase() })
 
         val arr = JSONArray()
         for ((pkg, label, leanback) in rows) {
@@ -243,7 +238,7 @@ class TVAccessibilityService : AccessibilityService() {
             entry.put("leanback", leanback)
             arr.put(entry)
         }
-        Log.i(TAG, "list_apps returning ${rows.size} apps")
+        Log.i(TAG, "list_apps returning ${rows.size} apps (${rows.count { it.third }} leanback)")
         return OutboundFrame(
             id = frame.id,
             ok = true,
