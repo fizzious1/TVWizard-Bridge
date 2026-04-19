@@ -11,8 +11,8 @@ android {
         applicationId = "ai.djwizard.tvbridge"
         minSdk = 23
         targetSdk = 34
-        versionCode = 5
-        versionName = "0.4.1"
+        versionCode = 6
+        versionName = "0.5.0"
 
         // Pass runtime config through BuildConfig. -P values from gradle.properties
         // or the command line win; empty string means "prompt the user at runtime".
@@ -37,12 +37,37 @@ android {
         jvmTarget = "17"
     }
 
+    // Release signing — credentials come from gradle.properties.local (gitignored)
+    // or -P flags at the build command. When unset, release builds fall back to
+    // debug signing so the build still produces an installable APK for dev.
+    // Production releases MUST come from a keystore-signed build; Play Protect
+    // flags debug-signed APKs as "potentially harmful."
+    val keystorePath = (findProperty("tvwizardKeystorePath") as? String).orEmpty()
+    val keystorePass = (findProperty("tvwizardKeystorePass") as? String).orEmpty()
+    val keyAliasName = (findProperty("tvwizardKeyAlias") as? String) ?: "tvwizard"
+    val keyPass = (findProperty("tvwizardKeyPass") as? String).orEmpty()
+    val hasReleaseKeystore = keystorePath.isNotBlank() && keystorePass.isNotBlank()
+
+    signingConfigs {
+        if (hasReleaseKeystore) {
+            create("release") {
+                storeFile = file(keystorePath)
+                storePassword = keystorePass
+                keyAlias = keyAliasName
+                keyPassword = keyPass
+            }
+        }
+    }
+
     buildTypes {
         debug {
             isMinifyEnabled = false
         }
         release {
             isMinifyEnabled = false
+            if (hasReleaseKeystore) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
 }
