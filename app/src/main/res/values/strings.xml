@@ -17,7 +17,10 @@
     <string name="status_online">Commands from Claude will land on this TV.</string>
 
     <!-- Pairing instruction -->
-    <string name="pair_instructions">Tell Claude: "pair my TV with code {{code}} and call it living-room"\n(or any name you want)</string>
+    <string name="pair_instructions">Scan this QR with your phone, or go to\ntv.djwizard.ai/claim and enter the code.</string>
+
+    <!-- Accessibility label for the pairing QR image -->
+    <string name="pair_qr_cd">QR code that opens the TVWizard claim page with the pairing code prefilled</string>
 
     <!-- Buttons -->
     <string name="btn_open_accessibility">Open Accessibility Settings</string>
