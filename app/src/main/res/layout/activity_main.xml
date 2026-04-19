@@ -17,14 +17,25 @@
         android:textStyle="bold"
         tools:text="Enable accessibility to continue" />
 
+    <ImageView
+        android:id="@+id/pairQr"
+        android:layout_width="280dp"
+        android:layout_height="280dp"
+        android:layout_marginTop="24dp"
+        android:contentDescription="@string/pair_qr_cd"
+        android:background="@android:color/white"
+        android:padding="8dp"
+        android:visibility="gone"
+        tools:visibility="visible" />
+
     <TextView
         android:id="@+id/pairCodeText"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginTop="24dp"
+        android:layout_marginTop="16dp"
         android:letterSpacing="0.2"
         android:textColor="@android:color/holo_orange_light"
-        android:textSize="96sp"
+        android:textSize="72sp"
         android:textStyle="bold"
         android:visibility="gone"
         tools:text="562721" />

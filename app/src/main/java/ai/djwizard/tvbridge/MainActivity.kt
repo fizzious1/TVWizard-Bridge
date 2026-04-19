@@ -53,6 +53,7 @@ class MainActivity : AppCompatActivity() {
                 binding.statusText.text = getString(R.string.status_awaiting_accessibility)
                 binding.pairCodeText.visibility = View.GONE
                 binding.pairInstructions.visibility = View.GONE
+                binding.pairQr.visibility = View.GONE
                 binding.primaryButton.visibility = View.VISIBLE
                 binding.primaryButton.text = getString(R.string.btn_open_accessibility)
                 binding.resetButton.visibility = View.GONE
@@ -64,6 +65,7 @@ class MainActivity : AppCompatActivity() {
                 binding.statusText.text = getString(R.string.status_connecting)
                 binding.pairCodeText.visibility = View.GONE
                 binding.pairInstructions.visibility = View.GONE
+                binding.pairQr.visibility = View.GONE
                 binding.primaryButton.visibility = View.GONE
                 binding.resetButton.visibility = View.VISIBLE
             }
@@ -74,10 +76,16 @@ class MainActivity : AppCompatActivity() {
                 binding.pairCodeText.visibility = View.VISIBLE
                 binding.pairInstructions.visibility = View.VISIBLE
                 binding.pairInstructions.text = getString(R.string.pair_instructions)
-                    .replace("{{code}}", state.code)
                 binding.statusText.text = ""
                 binding.primaryButton.visibility = View.GONE
                 binding.resetButton.visibility = View.VISIBLE
+
+                // Render the QR that opens /claim with the code prefilled. This
+                // is what lets a phone camera finish pairing without typing.
+                // 560px is 280dp ≈ 2x scale — plenty for a TV at couch distance.
+                val claimUrl = "https://tv.djwizard.ai/claim?code=${state.code}"
+                binding.pairQr.setImageBitmap(QrCode.render(claimUrl, QR_SIZE_PX))
+                binding.pairQr.visibility = View.VISIBLE
             }
 
             BridgeState.Online -> {
@@ -85,6 +93,7 @@ class MainActivity : AppCompatActivity() {
                 binding.statusText.text = getString(R.string.status_online)
                 binding.pairCodeText.visibility = View.GONE
                 binding.pairInstructions.visibility = View.GONE
+                binding.pairQr.visibility = View.GONE
                 binding.primaryButton.visibility = View.GONE
                 binding.resetButton.visibility = View.VISIBLE
             }
@@ -94,9 +103,16 @@ class MainActivity : AppCompatActivity() {
                 binding.statusText.text = state.message
                 binding.pairCodeText.visibility = View.GONE
                 binding.pairInstructions.visibility = View.GONE
+                binding.pairQr.visibility = View.GONE
                 binding.primaryButton.visibility = View.VISIBLE
                 binding.resetButton.visibility = View.VISIBLE
             }
         }
+    }
+
+    private companion object {
+        // Matches the ImageView's 280dp at 2x density. Bigger is sharper on
+        // high-DPI Google TVs without blowing up memory for the one-shot render.
+        const val QR_SIZE_PX = 560
     }
 }
