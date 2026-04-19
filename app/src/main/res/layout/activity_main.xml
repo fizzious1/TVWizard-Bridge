@@ -5,7 +5,7 @@
     android:layout_height="match_parent"
     android:orientation="vertical"
     android:gravity="center"
-    android:padding="64dp"
+    android:padding="48dp"
     android:background="@android:color/black">
 
     <TextView
@@ -13,43 +13,63 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:textColor="@android:color/white"
-        android:textSize="36sp"
+        android:textSize="32sp"
         android:textStyle="bold"
-        tools:text="Enable accessibility to continue" />
+        tools:text="Pair this TV with Claude" />
 
-    <ImageView
-        android:id="@+id/pairQr"
-        android:layout_width="280dp"
-        android:layout_height="280dp"
-        android:layout_marginTop="24dp"
-        android:contentDescription="@string/pair_qr_cd"
-        android:background="@android:color/white"
-        android:padding="8dp"
-        android:visibility="gone"
-        tools:visibility="visible" />
-
-    <TextView
-        android:id="@+id/pairCodeText"
+    <!-- Side-by-side QR + big code. Single container, toggled by MainActivity
+         in BridgeState.Pairing only. Horizontal layout uses the TV's
+         widescreen aspect so neither element gets pushed off the bottom by
+         the other — the previous vertical stack clipped the code on TV
+         overscan. -->
+    <LinearLayout
+        android:id="@+id/pairBlock"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginTop="16dp"
-        android:letterSpacing="0.2"
-        android:textColor="@android:color/holo_orange_light"
-        android:textSize="72sp"
-        android:textStyle="bold"
-        android:visibility="gone"
-        tools:text="562721" />
-
-    <TextView
-        android:id="@+id/pairInstructions"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="16dp"
+        android:orientation="horizontal"
         android:gravity="center"
-        android:textColor="@android:color/white"
-        android:textSize="18sp"
+        android:layout_marginTop="36dp"
         android:visibility="gone"
-        android:text="@string/pair_instructions" />
+        tools:visibility="visible">
+
+        <ImageView
+            android:id="@+id/pairQr"
+            android:layout_width="260dp"
+            android:layout_height="260dp"
+            android:contentDescription="@string/pair_qr_cd"
+            android:background="@android:color/white"
+            android:padding="10dp" />
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="40dp"
+            android:orientation="vertical"
+            android:gravity="center_vertical">
+
+            <TextView
+                android:id="@+id/pairCodeText"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:letterSpacing="0.12"
+                android:textColor="@android:color/holo_orange_light"
+                android:textSize="96sp"
+                android:textStyle="bold"
+                android:fontFamily="monospace"
+                tools:text="562721" />
+
+            <TextView
+                android:id="@+id/pairInstructions"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="20dp"
+                android:gravity="start"
+                android:textColor="@android:color/white"
+                android:textSize="17sp"
+                android:maxWidth="360dp"
+                android:text="@string/pair_instructions" />
+        </LinearLayout>
+    </LinearLayout>
 
     <TextView
         android:id="@+id/statusText"

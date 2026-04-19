@@ -51,9 +51,7 @@ class MainActivity : AppCompatActivity() {
             BridgeState.AwaitingAccessibility -> {
                 binding.titleText.text = getString(R.string.title_awaiting_accessibility)
                 binding.statusText.text = getString(R.string.status_awaiting_accessibility)
-                binding.pairCodeText.visibility = View.GONE
-                binding.pairInstructions.visibility = View.GONE
-                binding.pairQr.visibility = View.GONE
+                binding.pairBlock.visibility = View.GONE
                 binding.primaryButton.visibility = View.VISIBLE
                 binding.primaryButton.text = getString(R.string.btn_open_accessibility)
                 binding.resetButton.visibility = View.GONE
@@ -63,9 +61,7 @@ class MainActivity : AppCompatActivity() {
             BridgeState.Connecting -> {
                 binding.titleText.text = getString(R.string.title_connecting)
                 binding.statusText.text = getString(R.string.status_connecting)
-                binding.pairCodeText.visibility = View.GONE
-                binding.pairInstructions.visibility = View.GONE
-                binding.pairQr.visibility = View.GONE
+                binding.pairBlock.visibility = View.GONE
                 binding.primaryButton.visibility = View.GONE
                 binding.resetButton.visibility = View.VISIBLE
             }
@@ -73,27 +69,22 @@ class MainActivity : AppCompatActivity() {
             is BridgeState.Pairing -> {
                 binding.titleText.text = getString(R.string.title_pairing)
                 binding.pairCodeText.text = state.code
-                binding.pairCodeText.visibility = View.VISIBLE
-                binding.pairInstructions.visibility = View.VISIBLE
                 binding.pairInstructions.text = getString(R.string.pair_instructions)
                 binding.statusText.text = ""
                 binding.primaryButton.visibility = View.GONE
                 binding.resetButton.visibility = View.VISIBLE
 
-                // Render the QR that opens /claim with the code prefilled. This
-                // is what lets a phone camera finish pairing without typing.
-                // 560px is 280dp ≈ 2x scale — plenty for a TV at couch distance.
+                // Render the QR that opens /claim with the code prefilled.
+                // Scaled to match the 260dp ImageView at ~2x density.
                 val claimUrl = "https://tv.djwizard.ai/claim?code=${state.code}"
                 binding.pairQr.setImageBitmap(QrCode.render(claimUrl, QR_SIZE_PX))
-                binding.pairQr.visibility = View.VISIBLE
+                binding.pairBlock.visibility = View.VISIBLE
             }
 
             BridgeState.Online -> {
                 binding.titleText.text = getString(R.string.title_online)
                 binding.statusText.text = getString(R.string.status_online)
-                binding.pairCodeText.visibility = View.GONE
-                binding.pairInstructions.visibility = View.GONE
-                binding.pairQr.visibility = View.GONE
+                binding.pairBlock.visibility = View.GONE
                 binding.primaryButton.visibility = View.GONE
                 binding.resetButton.visibility = View.VISIBLE
             }
@@ -101,9 +92,7 @@ class MainActivity : AppCompatActivity() {
             is BridgeState.Error -> {
                 binding.titleText.text = getString(R.string.title_error)
                 binding.statusText.text = state.message
-                binding.pairCodeText.visibility = View.GONE
-                binding.pairInstructions.visibility = View.GONE
-                binding.pairQr.visibility = View.GONE
+                binding.pairBlock.visibility = View.GONE
                 binding.primaryButton.visibility = View.VISIBLE
                 binding.resetButton.visibility = View.VISIBLE
             }
@@ -111,8 +100,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private companion object {
-        // Matches the ImageView's 280dp at 2x density. Bigger is sharper on
+        // Matches the ImageView's 260dp at ~2x density. Bigger is sharper on
         // high-DPI Google TVs without blowing up memory for the one-shot render.
-        const val QR_SIZE_PX = 560
+        const val QR_SIZE_PX = 520
     }
 }
