@@ -5,14 +5,14 @@ plugins {
 
 android {
     namespace = "ai.djwizard.tvbridge"
-    compileSdk = 34
+    compileSdk = 35
 
     defaultConfig {
         applicationId = "ai.djwizard.tvbridge"
         minSdk = 23
-        targetSdk = 34
-        versionCode = 6
-        versionName = "0.5.0"
+        targetSdk = 35
+        versionCode = 7
+        versionName = "0.5.1"
 
         // Pass runtime config through BuildConfig. -P values from gradle.properties
         // or the command line win; empty string means "prompt the user at runtime".
