@@ -49,6 +49,7 @@ class TVAccessibilityService : AccessibilityService() {
     private lateinit var playback: PlaybackController
     private lateinit var volume: VolumeController
     private lateinit var captions: CaptionsController
+    private lateinit var input: InputController
 
     private val client: OkHttpClient by lazy {
         // No pingInterval — Caddy's reverse_proxy drops WS control frames.
@@ -64,6 +65,7 @@ class TVAccessibilityService : AccessibilityService() {
         playback = PlaybackController(applicationContext)
         volume = VolumeController(applicationContext)
         captions = CaptionsController(applicationContext)
+        input = InputController(applicationContext)
     }
 
     override fun onServiceConnected() {
@@ -207,6 +209,7 @@ class TVAccessibilityService : AccessibilityService() {
             OP_PLAYBACK -> playback.handle(frame)
             OP_VOLUME -> volume.handle(frame)
             OP_CAPTIONS -> captions.handle(frame)
+            OP_INPUT -> input.handle(frame)
             else -> OutboundFrame(frame.id, ok = false, message = "unsupported op: ${frame.op}")
         }
         ws.send(encodeOutbound(out))
