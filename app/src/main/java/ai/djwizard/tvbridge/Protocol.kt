@@ -14,6 +14,7 @@ const val OP_LIST_APPS = "list_apps"
 const val OP_OBSERVE = "observe"
 const val OP_PLAYBACK = "playback"
 const val OP_VOLUME = "volume"
+const val OP_CAPTIONS = "captions"
 
 // Playback op commands — the single "playback" op switches on `cmd` to keep
 // the bridge-side when() stable as we add more states. See
@@ -43,6 +44,21 @@ const val KEY_VOLUME_JSON = "volume_json"
 // ERR_VOLUME_NOT_AVAILABLE — AudioManager null or maxVolume=0 (phantom
 // audio stacks on headless Chromecast clones). Mirror in tools_volume.go.
 const val ERR_VOLUME_NOT_AVAILABLE = "volume_not_available"
+
+// Captions op commands + params + errors. See
+// TVWizard/docs/specs/0004-captions.md. Mirror every change in the relay's
+// tools_captions.go error code constants.
+const val CAPTIONS_CMD_ON = "on"
+const val CAPTIONS_CMD_OFF = "off"
+const val CAPTIONS_CMD_SET_LANGUAGE = "set_language"
+
+const val PARAM_CAPTIONS_CMD = "cmd"
+const val PARAM_CAPTIONS_LANG = "lang"
+
+const val KEY_CAPTIONS_JSON = "captions_json"
+
+const val ERR_CAPTIONS_UNSUPPORTED = "captions_unsupported"
+const val ERR_CAPTIONS_LANGUAGE_UNAVAILABLE = "captions_language_unavailable"
 
 // ERR_ACCESSIBILITY_NOT_GRANTED is the exact string the relay's
 // makeObserveHandler matches to tell Claude "a setup prompt was just
