@@ -6,6 +6,7 @@
 
     <!-- Titles for each bridge state -->
     <string name="title_awaiting_accessibility">Enable accessibility to continue</string>
+    <string name="title_awaiting_notification_listener">One more permission needed</string>
     <string name="title_pairing">Pair this TV with Claude</string>
     <string name="title_connecting">Connecting…</string>
     <string name="title_online">Online — ready for commands</string>
@@ -13,6 +14,7 @@
 
     <!-- Secondary status text -->
     <string name="status_awaiting_accessibility">Open Accessibility Settings → TVWizard Bridge and turn it on.</string>
+    <string name="status_awaiting_notification_listener">TVWizard needs Notification Access so it can read what\'s playing on your TV (for tv_get_playback and tv_seek). No notification content is actually read — the permission is a technical requirement for the media-session API.</string>
     <string name="status_connecting">Waiting for relay handshake — this retries automatically.</string>
     <string name="status_online">Commands from Claude will land on this TV.</string>
 
@@ -24,5 +26,6 @@
 
     <!-- Buttons -->
     <string name="btn_open_accessibility">Open Accessibility Settings</string>
+    <string name="btn_open_notification_access">Open Notification Access</string>
     <string name="btn_reset_pairing">Reset pairing</string>
 </resources>

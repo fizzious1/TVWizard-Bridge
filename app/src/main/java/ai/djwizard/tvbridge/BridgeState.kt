@@ -10,6 +10,11 @@ package ai.djwizard.tvbridge
 //   → Online             (WebSocket open, commands flow)
 sealed class BridgeState {
     data object AwaitingAccessibility : BridgeState()
+    // AwaitingNotificationListener — second permission gate for the v0.5.3+
+    // MediaSession-backed playback tools. Without BIND_NOTIFICATION_LISTENER_SERVICE
+    // granted, tv_get_playback / tv_seek would silently fail, so the service
+    // parks here and the UI prompts the user.
+    data object AwaitingNotificationListener : BridgeState()
     data object NeedsPairing : BridgeState()
     data class Pairing(val code: String) : BridgeState()
     data object Connecting : BridgeState()
