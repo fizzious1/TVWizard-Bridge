@@ -76,6 +76,21 @@
                 android:resource="@xml/accessibility_service_config" />
         </service>
 
+        <!-- NotificationListenerService — required to call
+             MediaSessionManager.getActiveSessions from an AccessibilityService.
+             The listener itself does not read notifications; it just provides
+             a ComponentName the media-session API accepts. User grants access
+             via Settings → Notifications → Notification access. -->
+        <service
+            android:name=".TVNotificationListener"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
         <receiver
             android:name=".BootReceiver"
             android:enabled="true"
