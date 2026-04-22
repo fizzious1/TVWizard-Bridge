@@ -70,7 +70,39 @@ class TVAccessibilityService : AccessibilityService() {
         super.onServiceConnected()
         Log.i(TAG, "accessibility service connected")
         instance = this
+        resumeIfPermissionsGranted()
+    }
+
+    // resumeIfPermissionsGranted checks the second permission gate
+    // (BIND_NOTIFICATION_LISTENER_SERVICE) before proceeding to pair/WS.
+    // When the listener is off we park in AwaitingNotificationListener so
+    // the UI can prompt the user. When it's on we proceed as before.
+    //
+    // Also called from MainActivity.onResume so the transition happens
+    // immediately after the user returns from Settings rather than waiting
+    // for an accessibility service rebind.
+    fun resumeIfPermissionsGranted() {
+        if (!isNotificationListenerEnabled()) {
+            Log.i(TAG, "notification listener not granted — gating")
+            wsJob?.cancel()
+            pairJob?.cancel()
+            webSocket?.close(1000, "permission gating")
+            stateSink.value = BridgeState.AwaitingNotificationListener
+            return
+        }
         startOrContinuePairing()
+    }
+
+    // isNotificationListenerEnabled reads Settings.Secure's flat list and
+    // checks whether our listener ComponentName is in it. Same approach as
+    // PlaybackController (they stay consistent).
+    private fun isNotificationListenerEnabled(): Boolean {
+        val flat = Settings.Secure.getString(
+            contentResolver,
+            "enabled_notification_listeners",
+        ) ?: return false
+        val target = android.content.ComponentName(this, TVNotificationListener::class.java).flattenToString()
+        return flat.split(":").any { it == target }
     }
 
     override fun onUnbind(intent: Intent?): Boolean {

@@ -30,6 +30,8 @@ class MainActivity : AppCompatActivity() {
             when (TVAccessibilityService.state.value) {
                 BridgeState.AwaitingAccessibility,
                 is BridgeState.Error -> startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                BridgeState.AwaitingNotificationListener ->
+                    startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
                 else -> { /* primary button hides itself in other states */ }
             }
         }
@@ -46,6 +48,14 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    // onResume re-pokes the service so the permission gates (accessibility
+    // already handled by the bind lifecycle; notification listener needs an
+    // explicit re-check) update the moment the user returns from Settings.
+    override fun onResume() {
+        super.onResume()
+        TVAccessibilityService.get()?.resumeIfPermissionsGranted()
+    }
+
     private fun render(state: BridgeState) {
         when (state) {
             BridgeState.AwaitingAccessibility -> {
@@ -54,6 +64,15 @@ class MainActivity : AppCompatActivity() {
                 binding.pairBlock.visibility = View.GONE
                 binding.primaryButton.visibility = View.VISIBLE
                 binding.primaryButton.text = getString(R.string.btn_open_accessibility)
+                binding.resetButton.visibility = View.GONE
+            }
+
+            BridgeState.AwaitingNotificationListener -> {
+                binding.titleText.text = getString(R.string.title_awaiting_notification_listener)
+                binding.statusText.text = getString(R.string.status_awaiting_notification_listener)
+                binding.pairBlock.visibility = View.GONE
+                binding.primaryButton.visibility = View.VISIBLE
+                binding.primaryButton.text = getString(R.string.btn_open_notification_access)
                 binding.resetButton.visibility = View.GONE
             }
 
