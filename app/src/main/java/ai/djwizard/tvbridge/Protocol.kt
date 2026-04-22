@@ -13,6 +13,7 @@ const val OP_LAUNCH_APP = "launch_app"
 const val OP_LIST_APPS = "list_apps"
 const val OP_OBSERVE = "observe"
 const val OP_PLAYBACK = "playback"
+const val OP_VOLUME = "volume"
 
 // Playback op commands — the single "playback" op switches on `cmd` to keep
 // the bridge-side when() stable as we add more states. See
@@ -27,6 +28,21 @@ const val PARAM_PLAYBACK_POSITION_MS = "position_ms"
 const val PARAM_PLAYBACK_DELTA_MS = "delta_ms"
 
 const val KEY_PLAYBACK_JSON = "playback_json"
+
+// Volume op commands + params. See TVWizard/docs/specs/0002-volume-absolute.md.
+const val VOLUME_CMD_GET = "get"
+const val VOLUME_CMD_SET = "set"
+const val VOLUME_CMD_MUTE = "mute"
+const val VOLUME_CMD_UNMUTE = "unmute"
+
+const val PARAM_VOLUME_CMD = "cmd"
+const val PARAM_VOLUME_LEVEL = "level"
+
+const val KEY_VOLUME_JSON = "volume_json"
+
+// ERR_VOLUME_NOT_AVAILABLE — AudioManager null or maxVolume=0 (phantom
+// audio stacks on headless Chromecast clones). Mirror in tools_volume.go.
+const val ERR_VOLUME_NOT_AVAILABLE = "volume_not_available"
 
 // ERR_ACCESSIBILITY_NOT_GRANTED is the exact string the relay's
 // makeObserveHandler matches to tell Claude "a setup prompt was just
