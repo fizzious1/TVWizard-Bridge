@@ -60,6 +60,19 @@ const val KEY_CAPTIONS_JSON = "captions_json"
 const val ERR_CAPTIONS_UNSUPPORTED = "captions_unsupported"
 const val ERR_CAPTIONS_LANGUAGE_UNAVAILABLE = "captions_language_unavailable"
 
+// Input op — see TVWizard/docs/specs/0007-tv-type.md.
+const val OP_INPUT = "input"
+
+const val INPUT_CMD_TYPE = "type"
+
+const val PARAM_INPUT_CMD = "cmd"
+const val PARAM_INPUT_TEXT = "text"
+
+const val KEY_INPUT_JSON = "input_json"
+
+const val ERR_INPUT_NO_EDITABLE_FOCUS = "input_no_editable_focus"
+const val ERR_INPUT_SET_TEXT_REJECTED = "input_set_text_rejected"
+
 // ERR_ACCESSIBILITY_NOT_GRANTED is the exact string the relay's
 // makeObserveHandler matches to tell Claude "a setup prompt was just
 // posted on the TV". Do NOT change without updating the relay in lockstep.
