@@ -11,8 +11,8 @@ android {
         applicationId = "ai.djwizard.tvbridge"
         minSdk = 23
         targetSdk = 34
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 6
+        versionName = "0.6.0"
 
         // Pass runtime config through BuildConfig. -P values from gradle.properties
         // or the command line win; empty string means "prompt the user at runtime".
@@ -56,4 +56,11 @@ dependencies {
     implementation("com.google.android.material:material:1.12.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+
+    // JVM unit tests for Protocol.kt round-trip — see app/src/test/.
+    // Android-framework code (AccessibilityService, AudioManager,
+    // CaptioningManager) cannot be unit-tested without Robolectric;
+    // those code paths are validated manually + via instrumented tests
+    // out-of-scope for this PR.
+    testImplementation("junit:junit:4.13.2")
 }

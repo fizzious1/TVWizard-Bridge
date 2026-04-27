@@ -89,6 +89,28 @@ Outbound (bridge → relay):
 Supported keys: `POWER HOME BACK UP DOWN LEFT RIGHT OK VOL_UP VOL_DOWN`.
 Mapping lives in [`KeyAction.kt`](app/src/main/java/ai/djwizard/tvbridge/KeyAction.kt).
 
+### Workstream-F ops (v0.6.0)
+
+Each op multiplexes a `cmd` param the way `key` uses `key`. Param + data-key
+constants live in [`Protocol.kt`](app/src/main/java/ai/djwizard/tvbridge/Protocol.kt).
+
+| Op | Cmds | Required params | Outbound `data` key |
+|---|---|---|---|
+| `volume`   | `get`, `set`, `mute`, `unmute` | `level` (0..100, only on `set`) | `volume_json` |
+| `playback` | `get`, `seek`, `pause`, `resume` | `position_ms` or `delta_ms` (on `seek`) | `playback_json` |
+| `captions` | `on`, `off`, `set_language` | `lang` (ISO-639-1, only on `set_language`) | `captions_json` |
+| `input`    | `type` | `text` | `input_json` |
+
+Note: `tv_type` MCP tool dispatches op `input` (not `type`) — the wire surface
+reserves room for future input cmds (backspace, select_all). Data key is
+`input_json` accordingly.
+
+Bridge-side error codes returned in `message` when `ok=false` (relay translates
+them into Claude-facing hints):
+`accessibility_not_granted`, `playback_no_session`, `playback_seek_unsupported`,
+`volume_not_available`, `captions_unsupported`, `captions_language_unavailable`,
+`input_no_editable_focus`, `input_set_text_rejected`.
+
 ## Layout
 
 | File | Role |

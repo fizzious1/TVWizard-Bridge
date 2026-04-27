@@ -5,6 +5,7 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.media.AudioManager
@@ -198,6 +199,10 @@ class TVAccessibilityService : AccessibilityService() {
             OP_LAUNCH_APP -> handleLaunchApp(frame)
             OP_LIST_APPS -> handleListApps(frame)
             OP_OBSERVE -> handleObserve(frame)
+            OP_VOLUME -> handleVolume(frame)
+            OP_PLAYBACK -> handlePlayback(frame)
+            OP_CAPTIONS -> handleCaptions(frame)
+            OP_INPUT -> handleInput(frame)
             else -> OutboundFrame(frame.id, ok = false, message = "unsupported op: ${frame.op}")
         }
         ws.send(encodeOutbound(out))
@@ -328,6 +333,76 @@ class TVAccessibilityService : AccessibilityService() {
             root.recycle()
         }
     }
+
+    // ── Workstream-F handlers ────────────────────────────────────────────
+    // Each handler is a thin shim: it delegates to a stateless controller
+    // object, never throws across the WS, and matches the relay-side
+    // wire contract pinned in /docs/specs/000{1,2,4,7}-*.md. Don't mutate
+    // service-instance state here — the existing handlers are stateless
+    // and we keep the same pattern so a stuck handler can't cascade.
+
+    // handleVolume — Spec 0002. STREAM_MUSIC is the canonical media
+    // stream on Android TV; level is 0..100 abstracted over the device's
+    // (often 15- or 30-step) AudioManager max.
+    private fun handleVolume(frame: InboundFrame): OutboundFrame {
+        return try {
+            VolumeController.handle(this, frame)
+        } catch (t: Throwable) {
+            Log.w(TAG, "volume failed: ${t.message}")
+            OutboundFrame(frame.id, ok = false, message = "volume failed: ${t.message}")
+        }
+    }
+
+    // handlePlayback — Spec 0001. Primary path is MediaSessionManager
+    // active-session lookup using THIS AccessibilityService's
+    // ComponentName. On Android-TV builds where that path returns empty
+    // (no notification-listener equivalent grant), the controller falls
+    // back to scraping a visible MM:SS timecode from the accessibility
+    // tree. We fetch rootInActiveWindow once here so the controller
+    // doesn't have to know about the AccessibilityService API surface.
+    private fun handlePlayback(frame: InboundFrame): OutboundFrame {
+        val component = ComponentName(this, TVAccessibilityService::class.java)
+        val root = rootInActiveWindow
+        return try {
+            PlaybackController.handle(this, component, root, frame)
+        } catch (t: Throwable) {
+            Log.w(TAG, "playback failed: ${t.message}")
+            OutboundFrame(frame.id, ok = false, message = "playback failed: ${t.message}")
+        } finally {
+            // PlaybackController only reads from `root` — it does not
+            // own the lifetime, so we recycle here.
+            try { root?.recycle() } catch (_: Throwable) {}
+        }
+    }
+
+    // handleCaptions — Spec 0004. Reflection on CaptioningManager.set
+    // Enabled / setLocale is wrapped in try/catch by the controller; we
+    // never throw across the WS regardless of the OEM's @hide enforcement.
+    private fun handleCaptions(frame: InboundFrame): OutboundFrame {
+        return try {
+            captionsController.handle(frame)
+        } catch (t: Throwable) {
+            Log.w(TAG, "captions failed: ${t.message}")
+            OutboundFrame(frame.id, ok = false, message = ERR_CAPTIONS_UNSUPPORTED)
+        }
+    }
+
+    // handleInput — Spec 0007 (`tv_type`). Note the wire op is "input"
+    // not "type" — the relay reserved the surface for future input cmds.
+    // The data key is correspondingly KEY_INPUT_JSON ("input_json").
+    private fun handleInput(frame: InboundFrame): OutboundFrame {
+        val root = rootInActiveWindow
+        return try {
+            InputController.handle(root, frame)
+        } catch (t: Throwable) {
+            Log.w(TAG, "input failed: ${t.message}")
+            OutboundFrame(frame.id, ok = false, message = "input failed: ${t.message}")
+        } finally {
+            try { root?.recycle() } catch (_: Throwable) {}
+        }
+    }
+
+    private val captionsController: CaptionsController by lazy { CaptionsController(this) }
 
     // NodeSnap is a POJO copy of the bits of an AccessibilityNodeInfo we
     // actually ship. Using it frees us from holding onto live Node refs

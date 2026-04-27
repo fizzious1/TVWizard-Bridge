@@ -16,6 +16,20 @@
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"
         tools:ignore="QueryAllPackagesPermission" />
 
+    <!-- Workstream-F deliberately ships WITHOUT android.permission.MEDIA_CONTENT_CONTROL.
+         That permission is signature|privileged on every Android-TV ROM we've
+         tested; declaring it produces a Play Console policy flag without any
+         runtime grant. From Android 14+ an enabled AccessibilityService can
+         call MediaSessionManager.getActiveSessions(componentName) without it.
+         If we observe empty active-session lists for known-publishing apps
+         (Netflix, YouTube TV) on shipped devices, revisit per Spec 0001's
+         "Provider quirks" table. -->
+    <!-- No extra permissions for tv_type, tv_volume, or tv_captions either:
+         AccessibilityNodeInfo.ACTION_SET_TEXT, AudioManager.STREAM_MUSIC, and
+         CaptioningManager (reflection on hidden setEnabled/setLocale) all
+         work from the AccessibilityService context. -->
+
+
     <!-- Android 11+ package visibility: declare the Intent shapes we dispatch
          via tv.launch_app so startActivity() with setPackage() works against
          installed third-party apps. -->
