@@ -11,8 +11,8 @@ android {
         applicationId = "ai.djwizard.tvbridge"
         minSdk = 23
         targetSdk = 35
-        versionCode = 11
-        versionName = "0.5.5"
+        versionCode = 12
+        versionName = "0.6.0"
 
         // Pass runtime config through BuildConfig. -P values from gradle.properties
         // or the command line win; empty string means "prompt the user at runtime".
