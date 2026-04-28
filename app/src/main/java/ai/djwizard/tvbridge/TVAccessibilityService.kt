@@ -286,6 +286,19 @@ class TVAccessibilityService : AccessibilityService() {
         // the MCP caller has the final say on which app handles the intent.
         if (pkg.isNotEmpty()) intent.setPackage(pkg)
 
+        // startActivity() from an AccessibilityService doesn't always throw when
+        // no activity matches — Android may silently log to system and no-op.
+        // resolveActivity() is the canonical pre-flight: null means no activity
+        // in the manifest matches this (action, data, category, package) tuple.
+        if (intent.resolveActivity(packageManager) == null) {
+            Log.w(TAG, "launch_app no activity matches data=$data package=$pkg")
+            return OutboundFrame(
+                frame.id,
+                ok = false,
+                message = "no activity matches intent (data=$data package=$pkg)",
+            )
+        }
+
         return try {
             startActivity(intent)
             Log.i(TAG, "launch_app data=$data package=$pkg ok=true")
