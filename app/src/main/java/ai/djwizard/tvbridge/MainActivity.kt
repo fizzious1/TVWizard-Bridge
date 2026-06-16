@@ -44,6 +44,19 @@ class MainActivity : AppCompatActivity() {
                 TVAccessibilityService.state.collect { render(it) }
             }
         }
+
+        // Wire Shizuku so d-pad/OK can reach fullscreen players via real key
+        // injection. No-op if Shizuku isn't installed/running.
+        ShizukuController.init()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // When Shizuku is up but not yet granted, prompt here — requesting the
+        // permission needs an interactive Activity context.
+        if (ShizukuController.isAvailable() && !ShizukuController.hasPermission()) {
+            ShizukuController.requestPermission()
+        }
     }
 
     private fun render(state: BridgeState) {

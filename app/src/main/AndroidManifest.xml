@@ -91,6 +91,17 @@
             </intent-filter>
         </service>
 
+        <!-- Shizuku — provides the binder the app uses to reach the Shizuku
+             server for privileged `input keyevent` injection. Authority must
+             be applicationId + ".shizuku". See ShizukuController.kt. -->
+        <provider
+            android:name="rikka.shizuku.ShizukuProvider"
+            android:authorities="${applicationId}.shizuku"
+            android:multiprocess="false"
+            android:enabled="true"
+            android:exported="true"
+            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
+
         <receiver
             android:name=".BootReceiver"
             android:enabled="true"

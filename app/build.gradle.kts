@@ -9,10 +9,12 @@ android {
 
     defaultConfig {
         applicationId = "ai.djwizard.tvbridge"
-        minSdk = 23
+        // 24 is the floor for dev.rikka.shizuku:api 13.1.5. Android TV boxes are
+        // effectively all API 24+ (7.0), so this drops no real devices.
+        minSdk = 24
         targetSdk = 35
-        versionCode = 14
-        versionName = "0.6.2"
+        versionCode = 15
+        versionName = "0.6.3"
 
         // Pass runtime config through BuildConfig. -P values from gradle.properties
         // or the command line win; empty string means "prompt the user at runtime".
@@ -27,6 +29,9 @@ android {
     buildFeatures {
         buildConfig = true
         viewBinding = true
+        // AGP 8 disables AIDL by default; the Shizuku UserService interface
+        // (IUserService.aidl) needs it.
+        aidl = true
     }
 
     compileOptions {
@@ -83,4 +88,8 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
     // QR code renderer — core only, no Android-embedded layer. See QrCode.kt.
     implementation("com.google.zxing:core:3.5.3")
+    // Shizuku — privileged key injection (`input keyevent`) so d-pad/OK reach
+    // fullscreen players on Android <13. See ShizukuController.kt.
+    implementation("dev.rikka.shizuku:api:13.1.5")
+    implementation("dev.rikka.shizuku:provider:13.1.5")
 }

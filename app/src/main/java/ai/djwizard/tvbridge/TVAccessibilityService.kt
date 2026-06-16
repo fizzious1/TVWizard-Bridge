@@ -14,6 +14,7 @@ import android.media.AudioManager
 import android.os.Build
 import android.provider.Settings
 import android.util.Log
+import android.view.KeyEvent
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import org.json.JSONArray
@@ -69,6 +70,9 @@ class TVAccessibilityService : AccessibilityService() {
         volume = VolumeController(applicationContext)
         captions = CaptionsController(applicationContext)
         input = InputController(applicationContext)
+        // Bind Shizuku if it's already running + granted, so d-pad/OK can use
+        // real key injection in players. No-op when Shizuku is absent.
+        ShizukuController.init()
     }
 
     override fun onServiceConnected() {
@@ -622,7 +626,21 @@ class TVAccessibilityService : AccessibilityService() {
     // that expose scrollable AccessibilityNodeInfos (YouTube, most TV
     // launchers); it won't work in apps that handle DPAD purely via
     // onKeyDown without exposing scroll actions.
+    private fun dpadKeyCode(dir: DpadDirection): Int = when (dir) {
+        DpadDirection.UP -> KeyEvent.KEYCODE_DPAD_UP
+        DpadDirection.DOWN -> KeyEvent.KEYCODE_DPAD_DOWN
+        DpadDirection.LEFT -> KeyEvent.KEYCODE_DPAD_LEFT
+        DpadDirection.RIGHT -> KeyEvent.KEYCODE_DPAD_RIGHT
+    }
+
     private fun dispatchDpad(key: String, dir: DpadDirection): Boolean {
+        // Prefer Shizuku: `input keyevent` injects a real d-pad press that
+        // reaches fullscreen players, unlike GLOBAL_ACTION_DPAD_* (API 33+,
+        // unavailable here) or the scroll fallback (no node on a player).
+        if (ShizukuController.isReady() && ShizukuController.sendKeyEvent(dpadKeyCode(dir))) {
+            Log.i(TAG, "dispatchKey key=$key shizuku ok=true")
+            return true
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             val global = when (dir) {
                 DpadDirection.UP -> AccessibilityService.GLOBAL_ACTION_DPAD_UP
@@ -661,6 +679,10 @@ class TVAccessibilityService : AccessibilityService() {
     }
 
     private fun dispatchSelect(key: String): Boolean {
+        if (ShizukuController.isReady() && ShizukuController.sendKeyEvent(KeyEvent.KEYCODE_DPAD_CENTER)) {
+            Log.i(TAG, "dispatchKey key=$key shizuku center ok=true")
+            return true
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             val ok = performGlobalAction(AccessibilityService.GLOBAL_ACTION_DPAD_CENTER)
             if (ok) {
