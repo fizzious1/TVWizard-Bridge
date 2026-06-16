@@ -103,6 +103,27 @@ const val KEY_OK = "OK"
 const val KEY_VOL_UP = "VOL_UP"
 const val KEY_VOL_DOWN = "VOL_DOWN"
 
+// Gesture op — injects touch events via AccessibilityService.dispatchGesture
+// (API 24+, no INJECT_EVENTS needed). This is the one path that can drive
+// fullscreen video players on Android <13, where GLOBAL_ACTION_DPAD_* does not
+// exist and the scroll fallback finds no scrollable node. Coordinates are
+// normalized (0.0..1.0) of the screen so the relay stays screen-size-agnostic;
+// the bridge scales to real pixels. Mirror every change in tools_gesture.go.
+const val OP_GESTURE = "gesture"
+
+const val GESTURE_CMD_TAP = "tap"
+const val GESTURE_CMD_SWIPE = "swipe"
+
+const val PARAM_GESTURE_CMD = "cmd"
+const val PARAM_GESTURE_X = "x"     // normalized 0..1, default 0.5 (tap)
+const val PARAM_GESTURE_Y = "y"     // normalized 0..1, default 0.5 (tap)
+const val PARAM_GESTURE_DIR = "dir" // up|down|left|right (swipe)
+
+const val KEY_GESTURE_JSON = "gesture_json"
+
+const val ERR_GESTURE_UNSUPPORTED = "gesture_unsupported"
+const val ERR_GESTURE_DISPATCH_FAILED = "gesture_dispatch_failed"
+
 data class InboundFrame(
     val id: String,
     val op: String,

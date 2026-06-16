@@ -1,12 +1,15 @@
 package ai.djwizard.tvbridge
 
 import android.accessibilityservice.AccessibilityService
+import android.accessibilityservice.GestureDescription
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.graphics.Path
+import android.graphics.Rect
 import android.media.AudioManager
 import android.os.Build
 import android.provider.Settings
@@ -210,6 +213,7 @@ class TVAccessibilityService : AccessibilityService() {
             OP_VOLUME -> volume.handle(frame)
             OP_CAPTIONS -> captions.handle(frame)
             OP_INPUT -> input.handle(frame)
+            OP_GESTURE -> handleGesture(frame)
             else -> OutboundFrame(frame.id, ok = false, message = "unsupported op: ${frame.op}")
         }
         ws.send(encodeOutbound(out))
@@ -225,6 +229,85 @@ class TVAccessibilityService : AccessibilityService() {
             ok = ok,
             message = if (ok) "" else "could not dispatch $key",
             data = mapOf("key" to key),
+        )
+    }
+
+    // handleGesture injects a touch gesture via dispatchGesture. Unlike the
+    // d-pad path, this works inside fullscreen video players on Android <13
+    // because it never needs INJECT_EVENTS or a focused accessibility node —
+    // the OS synthesizes the touch from screen coordinates. cmd=tap presses a
+    // single point (default screen centre); cmd=swipe drags from centre toward
+    // a direction. Coordinates arrive normalized (0..1); we scale to pixels.
+    private fun handleGesture(frame: InboundFrame): OutboundFrame {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) {
+            return OutboundFrame(frame.id, ok = false, message = ERR_GESTURE_UNSUPPORTED)
+        }
+        val cmd = frame.params[PARAM_GESTURE_CMD].orEmpty()
+        val dm = resources.displayMetrics
+        val w = dm.widthPixels.toFloat()
+        val h = dm.heightPixels.toFloat()
+        if (w <= 0f || h <= 0f) {
+            return OutboundFrame(frame.id, ok = false, message = ERR_GESTURE_DISPATCH_FAILED)
+        }
+        val path = Path()
+        val durationMs: Long
+        when (cmd) {
+            GESTURE_CMD_TAP -> {
+                val x = (frame.params[PARAM_GESTURE_X]?.toFloatOrNull() ?: 0.5f).coerceIn(0f, 1f) * w
+                val y = (frame.params[PARAM_GESTURE_Y]?.toFloatOrNull() ?: 0.5f).coerceIn(0f, 1f) * h
+                path.moveTo(x, y)
+                path.lineTo(x, y)
+                durationMs = 60L
+            }
+            GESTURE_CMD_SWIPE -> {
+                val cx = w / 2f
+                val cy = h / 2f
+                val dx = w * 0.35f
+                val dy = h * 0.35f
+                val end: Pair<Float, Float> = when (frame.params[PARAM_GESTURE_DIR].orEmpty()) {
+                    "up" -> cx to (cy - dy)
+                    "down" -> cx to (cy + dy)
+                    "left" -> (cx - dx) to cy
+                    "right" -> (cx + dx) to cy
+                    else -> return OutboundFrame(frame.id, ok = false, message = "gesture dir must be up|down|left|right")
+                }
+                path.moveTo(cx, cy)
+                path.lineTo(end.first, end.second)
+                durationMs = 160L
+            }
+            else -> return OutboundFrame(frame.id, ok = false, message = "unknown gesture cmd: $cmd")
+        }
+        val gesture = GestureDescription.Builder()
+            .addStroke(GestureDescription.StrokeDescription(path, 0L, durationMs))
+            .build()
+        val latch = java.util.concurrent.CountDownLatch(1)
+        val completed = booleanArrayOf(false)
+        val dispatched = dispatchGesture(
+            gesture,
+            object : GestureResultCallback() {
+                override fun onCompleted(d: GestureDescription?) {
+                    completed[0] = true
+                    latch.countDown()
+                }
+
+                override fun onCancelled(d: GestureDescription?) {
+                    completed[0] = false
+                    latch.countDown()
+                }
+            },
+            null,
+        )
+        if (!dispatched) {
+            return OutboundFrame(frame.id, ok = false, message = ERR_GESTURE_DISPATCH_FAILED)
+        }
+        // dispatchGesture is async; wait briefly for the completion callback so
+        // the relay's ack reflects whether the gesture actually landed.
+        latch.await(2L, TimeUnit.SECONDS)
+        return OutboundFrame(
+            id = frame.id,
+            ok = completed[0],
+            message = if (completed[0]) "" else ERR_GESTURE_DISPATCH_FAILED,
+            data = mapOf("cmd" to cmd),
         )
     }
 
@@ -357,7 +440,16 @@ class TVAccessibilityService : AccessibilityService() {
     // NodeSnap is a POJO copy of the bits of an AccessibilityNodeInfo we
     // actually ship. Using it frees us from holding onto live Node refs
     // across the tree walk — every Node we touch is recycled immediately.
-    private data class NodeSnap(val text: String, val desc: String, val clickable: Boolean)
+    // cxN/cyN are the node's on-screen centre, normalized 0..1, so a caller
+    // can feed them straight into tv_tap{x,y} to press this exact node — the
+    // enabler for driving player overlays where d-pad injection fails.
+    private data class NodeSnap(
+        val text: String,
+        val desc: String,
+        val clickable: Boolean,
+        val cxN: Float,
+        val cyN: Float,
+    )
 
     // maxVisibleNodes caps the snapshot per ADR-0003. 50 is enough for any
     // reasonable streaming-app screen; truncating at that point keeps Claude
@@ -384,9 +476,13 @@ class TVAccessibilityService : AccessibilityService() {
         }
         obj.put("focused", focusedObj)
 
+        val dm = resources.displayMetrics
+        val screenW = dm.widthPixels.toFloat().coerceAtLeast(1f)
+        val screenH = dm.heightPixels.toFloat().coerceAtLeast(1f)
+
         val collected = mutableListOf<NodeSnap>()
         // Collect one extra so we know whether truncation is needed.
-        collectVisible(root, collected, maxVisibleNodes + 1)
+        collectVisible(root, collected, maxVisibleNodes + 1, screenW, screenH)
 
         val truncated = collected.size > maxVisibleNodes
         val emit = if (truncated) collected.subList(0, maxVisibleNodes) else collected
@@ -396,6 +492,9 @@ class TVAccessibilityService : AccessibilityService() {
             if (snap.text.isNotEmpty()) n.put("text", snap.text)
             if (snap.desc.isNotEmpty()) n.put("content_description", snap.desc)
             n.put("clickable", snap.clickable)
+            // Round to 4 dp — enough precision to hit a node, no token bloat.
+            n.put("cx", Math.round(snap.cxN * 10000f) / 10000.0)
+            n.put("cy", Math.round(snap.cyN * 10000f) / 10000.0)
             arr.put(n)
         }
         if (truncated) {
@@ -412,18 +511,34 @@ class TVAccessibilityService : AccessibilityService() {
     // user-visible text or content description into `out`. Each Node it
     // touches is recycled on the way out. Stops growing `out` once `cap` is
     // hit — we still descend to ensure recycling, but don't emit more rows.
-    private fun collectVisible(node: AccessibilityNodeInfo, out: MutableList<NodeSnap>, cap: Int) {
+    private fun collectVisible(
+        node: AccessibilityNodeInfo,
+        out: MutableList<NodeSnap>,
+        cap: Int,
+        screenW: Float,
+        screenH: Float,
+    ) {
         if (out.size < cap) {
             val text = node.text?.toString().orEmpty()
             val desc = node.contentDescription?.toString().orEmpty()
             if (text.isNotEmpty() || desc.isNotEmpty()) {
-                out.add(NodeSnap(text, desc, node.isClickable))
+                val r = Rect()
+                node.getBoundsInScreen(r)
+                out.add(
+                    NodeSnap(
+                        text = text,
+                        desc = desc,
+                        clickable = node.isClickable,
+                        cxN = (r.centerX() / screenW).coerceIn(0f, 1f),
+                        cyN = (r.centerY() / screenH).coerceIn(0f, 1f),
+                    ),
+                )
             }
         }
         for (i in 0 until node.childCount) {
             val child = node.getChild(i) ?: continue
             try {
-                collectVisible(child, out, cap)
+                collectVisible(child, out, cap, screenW, screenH)
             } finally {
                 child.recycle()
             }
