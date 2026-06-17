@@ -157,6 +157,10 @@ class TVAccessibilityService : AccessibilityService() {
                     .header("X-Bridge-Api-Level", Build.VERSION.SDK_INT.toString())
                     .header("X-Bridge-Android-Release", Build.VERSION.RELEASE ?: "")
                     .header("X-Bridge-Model", Build.MODEL ?: "")
+                    .header("X-Bridge-Manufacturer", Build.MANUFACTURER ?: "")
+                    // Bridge app version — feeds the relay's "update available"
+                    // detection (Phase 3) and tier-aware logic.
+                    .header("X-Bridge-Version", BuildConfig.VERSION_NAME)
                     .build()
                 val pendingCode = config.pendingPairCode
                 stateSink.value = if (pendingCode != null) BridgeState.Pairing(pendingCode) else BridgeState.Connecting
