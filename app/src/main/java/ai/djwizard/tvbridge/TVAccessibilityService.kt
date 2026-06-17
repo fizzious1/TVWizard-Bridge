@@ -152,6 +152,11 @@ class TVAccessibilityService : AccessibilityService() {
                 val req = Request.Builder()
                     .url(wsUrl)
                     .header("Authorization", "Bearer $token")
+                    // Report the device environment so the relay can gate
+                    // in-player tools (d-pad injection needs Android 13+/API 33).
+                    .header("X-Bridge-Api-Level", Build.VERSION.SDK_INT.toString())
+                    .header("X-Bridge-Android-Release", Build.VERSION.RELEASE ?: "")
+                    .header("X-Bridge-Model", Build.MODEL ?: "")
                     .build()
                 val pendingCode = config.pendingPairCode
                 stateSink.value = if (pendingCode != null) BridgeState.Pairing(pendingCode) else BridgeState.Connecting
