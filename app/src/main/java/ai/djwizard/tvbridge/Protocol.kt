@@ -124,6 +124,20 @@ const val KEY_GESTURE_JSON = "gesture_json"
 const val ERR_GESTURE_UNSUPPORTED = "gesture_unsupported"
 const val ERR_GESTURE_DISPATCH_FAILED = "gesture_dispatch_failed"
 
+// Subtitle overlay op — draws our own subtitle line on top of the player via a
+// TYPE_ACCESSIBILITY_OVERLAY window. This is the dependency-free way to put
+// subtitles on the TV on Android <13: it never touches the app's own subtitle
+// UI (which can't be driven without key injection), and it works over any app
+// including Netflix. The relay feeds cues from its OpenSubtitles pipeline.
+// Mirror every change in tools_subtitles_overlay.go.
+const val OP_SUBTITLE = "subtitle"
+
+const val SUBTITLE_CMD_SHOW = "show"
+const val SUBTITLE_CMD_CLEAR = "clear"
+
+const val PARAM_SUBTITLE_CMD = "cmd"
+const val PARAM_SUBTITLE_TEXT = "text"
+
 data class InboundFrame(
     val id: String,
     val op: String,

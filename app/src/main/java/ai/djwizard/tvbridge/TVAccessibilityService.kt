@@ -53,6 +53,7 @@ class TVAccessibilityService : AccessibilityService() {
     private lateinit var volume: VolumeController
     private lateinit var captions: CaptionsController
     private lateinit var input: InputController
+    private lateinit var subtitleOverlay: SubtitleOverlayController
 
     private val client: OkHttpClient by lazy {
         // No pingInterval — Caddy's reverse_proxy drops WS control frames.
@@ -69,6 +70,7 @@ class TVAccessibilityService : AccessibilityService() {
         volume = VolumeController(applicationContext)
         captions = CaptionsController(applicationContext)
         input = InputController(applicationContext)
+        subtitleOverlay = SubtitleOverlayController(this)
     }
 
     override fun onServiceConnected() {
@@ -80,6 +82,7 @@ class TVAccessibilityService : AccessibilityService() {
 
     override fun onUnbind(intent: Intent?): Boolean {
         Log.i(TAG, "accessibility service unbound")
+        if (::subtitleOverlay.isInitialized) subtitleOverlay.clear()
         wsJob?.cancel()
         pairJob?.cancel()
         webSocket?.close(1000, "service unbound")
@@ -214,6 +217,7 @@ class TVAccessibilityService : AccessibilityService() {
             OP_CAPTIONS -> captions.handle(frame)
             OP_INPUT -> input.handle(frame)
             OP_GESTURE -> handleGesture(frame)
+            OP_SUBTITLE -> handleSubtitle(frame)
             else -> OutboundFrame(frame.id, ok = false, message = "unsupported op: ${frame.op}")
         }
         ws.send(encodeOutbound(out))
@@ -230,6 +234,23 @@ class TVAccessibilityService : AccessibilityService() {
             message = if (ok) "" else "could not dispatch $key",
             data = mapOf("key" to key),
         )
+    }
+
+    // handleSubtitle drives the on-top subtitle overlay. show{text} renders a
+    // line (blank text hides it); clear removes the overlay window. The relay's
+    // subtitle pipeline drives the timing.
+    private fun handleSubtitle(frame: InboundFrame): OutboundFrame {
+        return when (val cmd = frame.params[PARAM_SUBTITLE_CMD].orEmpty()) {
+            SUBTITLE_CMD_SHOW -> {
+                subtitleOverlay.show(frame.params[PARAM_SUBTITLE_TEXT].orEmpty())
+                OutboundFrame(frame.id, ok = true, data = mapOf("cmd" to SUBTITLE_CMD_SHOW))
+            }
+            SUBTITLE_CMD_CLEAR -> {
+                subtitleOverlay.clear()
+                OutboundFrame(frame.id, ok = true, data = mapOf("cmd" to SUBTITLE_CMD_CLEAR))
+            }
+            else -> OutboundFrame(frame.id, ok = false, message = "unknown subtitle cmd: $cmd")
+        }
     }
 
     // handleGesture injects a touch gesture via dispatchGesture. Unlike the
