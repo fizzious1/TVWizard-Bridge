@@ -78,6 +78,15 @@ const val ERR_INPUT_SET_TEXT_REJECTED = "input_set_text_rejected"
 // posted on the TV". Do NOT change without updating the relay in lockstep.
 const val ERR_ACCESSIBILITY_NOT_GRANTED = "accessibility_not_granted"
 
+// ERR_TRANSIENT_NO_ROOT — the accessibility service IS connected but
+// getRootInActiveWindow() returned null even after a short retry window,
+// which happens during app/window transitions (e.g. the first observe right
+// after a launch_app). Retryable: the caller should re-issue observe, NOT
+// tell the user to re-grant accessibility. The relay passes unknown codes
+// through verbatim; keep in sync if it ever starts matching this one.
+// See TVWizard/docs/bugs/server/2026-06-22-spurious-accessibility-not-granted-on-cold-launch.md.
+const val ERR_TRANSIENT_NO_ROOT = "transient_no_root"
+
 // Playback-specific error codes. Mirror tools_playback.go in the relay.
 // Unknown codes pass through verbatim on the relay side — but every code we
 // DO emit must be present here, or a rename breaks silently.

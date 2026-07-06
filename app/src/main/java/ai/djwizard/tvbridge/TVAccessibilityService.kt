@@ -32,6 +32,7 @@ import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import okio.ByteString
 import org.json.JSONObject
+import java.net.HttpURLConnection
 import java.util.concurrent.TimeUnit
 
 // The AccessibilityService is already a long-lived, system-managed component —
@@ -44,6 +45,15 @@ class TVAccessibilityService : AccessibilityService() {
     private var wsJob: Job? = null
     private var pairJob: Job? = null
     private var webSocket: WebSocket? = null
+
+    // serviceConnected tracks the real accessibility binding lifecycle
+    // (onServiceConnected → onUnbind). A null rootInActiveWindow is ambiguous
+    // — it can mean the grant is genuinely gone OR just a window transition
+    // in flight — so handlers must consult this flag before treating a null
+    // root as "accessibility not granted". Written on the main thread,
+    // read from the WebSocket reader thread.
+    @Volatile
+    private var serviceConnected = false
 
     private lateinit var config: ConfigStore
     private lateinit var playback: PlaybackController
@@ -71,12 +81,14 @@ class TVAccessibilityService : AccessibilityService() {
     override fun onServiceConnected() {
         super.onServiceConnected()
         Log.i(TAG, "accessibility service connected")
+        serviceConnected = true
         instance = this
         startOrContinuePairing()
     }
 
     override fun onUnbind(intent: Intent?): Boolean {
         Log.i(TAG, "accessibility service unbound")
+        serviceConnected = false
         wsJob?.cancel()
         pairJob?.cancel()
         webSocket?.close(1000, "service unbound")
@@ -142,6 +154,16 @@ class TVAccessibilityService : AccessibilityService() {
         if (wsJob?.isActive == true) return
         wsJob = scope.launch {
             var backoffMs = 1_000L
+            // Auth-failure give-up (TVWizard/docs/bugs/server/
+            // 2026-04-28-bridge-zombie-token-blackhole.md): a 401/403 on the
+            // WS upgrade outside of pending pairing means the relay no longer
+            // accepts our token (revoked, expired, or the pair store lost
+            // it). Retrying every few seconds forever turns this device into
+            // a zombie hammering the relay for days, so those failures back
+            // off exponentially to a long cap and surface a one-time
+            // "re-pair needed" notification instead.
+            var consecutiveAuthFailures = 0
+            var authBackoffMs = AUTH_BACKOFF_INITIAL_MS
             while (scope.coroutineContext[Job]?.isActive == true) {
                 val token = config.token
                 if (token.isBlank()) {
@@ -165,7 +187,12 @@ class TVAccessibilityService : AccessibilityService() {
                 val pendingCode = config.pendingPairCode
                 stateSink.value = if (pendingCode != null) BridgeState.Pairing(pendingCode) else BridgeState.Connecting
                 Log.i(TAG, "dialing $wsUrl")
-                val latch = kotlinx.coroutines.CompletableDeferred<Unit>()
+                // The latch resolves with the HTTP status of a rejected WS
+                // upgrade, or null for every other termination (clean close,
+                // network failure, failure after a successful open — OkHttp
+                // only passes a Response to onFailure when the upgrade
+                // itself was refused).
+                val latch = kotlinx.coroutines.CompletableDeferred<Int?>()
                 val ws = client.newWebSocket(req, object : WebSocketListener() {
                     override fun onOpen(webSocket: WebSocket, response: Response) {
                         Log.i(TAG, "ws open status=${response.code}")
@@ -185,18 +212,40 @@ class TVAccessibilityService : AccessibilityService() {
                         // bound to a device_id. Keep retrying; the user
                         // clears state explicitly via the Reset button.
                         Log.w(TAG, "ws failure: ${t.message} status=${response?.code}")
-                        latch.complete(Unit)
+                        latch.complete(response?.code)
                     }
                     override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                         Log.i(TAG, "ws closed code=$code reason=$reason")
-                        latch.complete(Unit)
+                        latch.complete(null)
                     }
                 })
                 webSocket = ws
-                latch.await()
+                val upgradeStatus = latch.await()
+                val pendingNow = config.pendingPairCode != null
+                val authRejected = !pendingNow &&
+                    (upgradeStatus == HttpURLConnection.HTTP_UNAUTHORIZED || upgradeStatus == HttpURLConnection.HTTP_FORBIDDEN)
+                if (authRejected) {
+                    consecutiveAuthFailures++
+                    Log.w(
+                        TAG,
+                        "ws upgrade rejected status=$upgradeStatus consecutive=$consecutiveAuthFailures next_retry_ms=$authBackoffMs",
+                    )
+                    if (consecutiveAuthFailures >= REPAIR_NEEDED_AFTER_AUTH_FAILURES) {
+                        stateSink.value = BridgeState.Error("Re-pair needed — the relay no longer accepts this TV's token.")
+                        // Post the TV-facing nudge exactly once per streak;
+                        // the notification would otherwise re-fire every
+                        // retry for as long as the token stays dead.
+                        if (consecutiveAuthFailures == REPAIR_NEEDED_AFTER_AUTH_FAILURES) postRePairNotification()
+                    }
+                    delay(authBackoffMs)
+                    authBackoffMs = (authBackoffMs * 2).coerceAtMost(AUTH_BACKOFF_CAP_MS)
+                    continue
+                }
+                // Anything other than an auth rejection ends the streak.
+                consecutiveAuthFailures = 0
+                authBackoffMs = AUTH_BACKOFF_INITIAL_MS
                 // While pairing is pending, poll faster so claim transitions
                 // to Online feel instant; once online-and-dropped, backoff.
-                val pendingNow = config.pendingPairCode != null
                 val sleep = if (pendingNow) 2_000L else backoffMs
                 delay(sleep)
                 if (!pendingNow) backoffMs = (backoffMs * 2).coerceAtMost(30_000)
@@ -337,16 +386,24 @@ class TVAccessibilityService : AccessibilityService() {
     // sync on both sides or the relay will reject the payload as "malformed
     // observe payload".
     private fun handleObserve(frame: InboundFrame): OutboundFrame {
-        val root = rootInActiveWindow
-        if (root == null) {
-            // The AccessibilityService is bound but can't read the active
-            // window. Most common cause is Android 13+ "restricted settings"
-            // blocking sideloaded accessibility services from seeing window
-            // content until the user explicitly allows it. Nudge the user
-            // with a TV-facing notification and surface the exact error code
-            // the relay handler is matching on.
+        if (!serviceConnected) {
+            // Genuine grant problem: the accessibility binding is down (user
+            // toggled it off, or Android 13+ "restricted settings" blocked a
+            // sideloaded service). Nudge the user with a TV-facing
+            // notification and surface the exact error code the relay
+            // handler is matching on.
             postAccessibilityNotification()
             return OutboundFrame(frame.id, ok = false, message = ERR_ACCESSIBILITY_NOT_GRANTED)
+        }
+        val root = awaitRootInActiveWindow()
+        if (root == null) {
+            // Connected but no root: a window transition is in flight (the
+            // classic case is the first observe right after launch_app).
+            // This is transient — NEVER post the setup prompt here; return a
+            // retryable code instead. See TVWizard/docs/bugs/server/
+            // 2026-06-22-spurious-accessibility-not-granted-on-cold-launch.md.
+            Log.w(TAG, "observe: root still null after $rootRetryAttempts attempts (window transition?)")
+            return OutboundFrame(frame.id, ok = false, message = ERR_TRANSIENT_NO_ROOT)
         }
         return try {
             val snapshot = buildObserveSnapshot(root)
@@ -361,6 +418,23 @@ class TVAccessibilityService : AccessibilityService() {
         } finally {
             root.recycle()
         }
+    }
+
+    // rootInActiveWindow returns null for a short window during app/window
+    // transitions. Poll a few times with a small spacing so the common
+    // cold-launch observe succeeds on its own instead of bouncing a
+    // transient error back to the relay. Worst case this blocks the WS
+    // reader thread for ~(attempts-1)*delay ≈ 400ms — well under the
+    // relay's command timeout, and frames are handled serially anyway.
+    private val rootRetryAttempts: Int = 3
+    private val rootRetryDelayMs: Long = 200L
+
+    private fun awaitRootInActiveWindow(): AccessibilityNodeInfo? {
+        repeat(rootRetryAttempts) { attempt ->
+            rootInActiveWindow?.let { return it }
+            if (attempt < rootRetryAttempts - 1) Thread.sleep(rootRetryDelayMs)
+        }
+        return null
     }
 
     // NodeSnap is a POJO copy of the bits of an AccessibilityNodeInfo we
@@ -443,12 +517,36 @@ class TVAccessibilityService : AccessibilityService() {
     // than one variant confuses the settings UI.
     private val notificationChannelId: String = "tvwizard_setup"
     private val accessibilitySetupNotificationId: Int = 1001
+    private val rePairNotificationId: Int = 1002
 
     // postAccessibilityNotification is the ADR-0003 "auto-surface a setup
-    // prompt on the TV" flow. In practice this fires when the service is
-    // bound but rootInActiveWindow returned null — most commonly Android
+    // prompt on the TV" flow. Fires ONLY when the accessibility binding is
+    // genuinely down (serviceConnected == false) — most commonly Android
     // 13's restricted-settings gate on sideloaded accessibility services.
+    // A transiently-null root must never land here.
     private fun postAccessibilityNotification() {
+        postSetupNotification(
+            notificationId = accessibilitySetupNotificationId,
+            title = "Finish TVWizard setup",
+            text = "Tap to let TVWizard read the screen.",
+            tapIntent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS),
+        )
+    }
+
+    // postRePairNotification fires once per auth-failure streak when the
+    // relay has repeatedly rejected our token on the WS upgrade — the token
+    // was revoked or expired and only a fresh pairing fixes it. Tapping
+    // opens the bridge app, where the user can reset and re-pair.
+    private fun postRePairNotification() {
+        postSetupNotification(
+            notificationId = rePairNotificationId,
+            title = "TVWizard needs re-pairing",
+            text = "The relay no longer accepts this TV. Open TVWizard Bridge to pair again.",
+            tapIntent = Intent(this, MainActivity::class.java),
+        )
+    }
+
+    private fun postSetupNotification(notificationId: Int, title: String, text: String, tapIntent: Intent) {
         try {
             val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -459,27 +557,25 @@ class TVAccessibilityService : AccessibilityService() {
                 )
                 nm.createNotificationChannel(channel)
             }
-            val settings = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             val pending = PendingIntent.getActivity(
                 this,
-                0,
-                settings,
+                notificationId,
+                tapIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
             )
             val notification = Notification.Builder(this, notificationChannelId)
                 .setSmallIcon(R.drawable.bridge_banner)
-                .setContentTitle("Finish TVWizard setup")
-                .setContentText("Tap to let TVWizard read the screen.")
+                .setContentTitle(title)
+                .setContentText(text)
                 .setContentIntent(pending)
                 .setAutoCancel(true)
                 .build()
-            nm.notify(accessibilitySetupNotificationId, notification)
-            Log.i(TAG, "posted accessibility-not-granted notification")
+            nm.notify(notificationId, notification)
+            Log.i(TAG, "posted setup notification id=$notificationId title=$title")
         } catch (t: Throwable) {
             // Notifications can fail if the channel post-permission is
             // revoked (Android 13+ POST_NOTIFICATIONS). Not fatal — we still
-            // return the accessibility_not_granted error to the relay.
+            // return the error code to the relay.
             Log.w(TAG, "could not post setup notification: ${t.message}")
         }
     }
@@ -593,6 +689,17 @@ class TVAccessibilityService : AccessibilityService() {
 
     companion object {
         private const val TAG = "TVBridge"
+
+        // WS-upgrade auth-failure backoff: first retry after 30s, doubling
+        // to a 1h cap. After REPAIR_NEEDED_AFTER_AUTH_FAILURES consecutive
+        // rejections we conclude the token is dead (not a relay blip) and
+        // tell the user to re-pair. Contrast with the network-failure
+        // backoff, which stays at a 30s cap — a flaky network should keep
+        // reconnecting eagerly; a dead token should not.
+        private const val AUTH_BACKOFF_INITIAL_MS = 30_000L
+        private const val AUTH_BACKOFF_CAP_MS = 3_600_000L // 1 hour
+        private const val REPAIR_NEEDED_AFTER_AUTH_FAILURES = 3
+
         @Volatile
         private var instance: TVAccessibilityService? = null
 
