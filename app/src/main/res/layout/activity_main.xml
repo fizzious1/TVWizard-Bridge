@@ -93,4 +93,24 @@
         android:layout_height="wrap_content"
         android:layout_marginTop="12dp"
         android:text="@string/btn_reset_pairing" />
+
+    <!-- One-tap self-updater (Q3 Phase 3.3). Always visible regardless of
+         bridge state — an unpaired or accessibility-less install must still
+         be able to update itself. -->
+    <Button
+        android:id="@+id/updateButton"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:text="@string/btn_check_updates" />
+
+    <TextView
+        android:id="@+id/updateStatusText"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:gravity="center"
+        android:textColor="@android:color/darker_gray"
+        android:textSize="14sp"
+        tools:text="Bridge v0.6.4 — update v0.7.0 available" />
 </LinearLayout>
