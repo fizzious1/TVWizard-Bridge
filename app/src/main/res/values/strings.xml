@@ -25,4 +25,17 @@
     <!-- Buttons -->
     <string name="btn_open_accessibility">Open Accessibility Settings</string>
     <string name="btn_reset_pairing">Reset pairing</string>
+    <string name="btn_check_updates">Check for updates</string>
+
+    <!-- Self-updater status line (Q3 Phase 3.3) -->
+    <string name="update_idle_version">Bridge v%1$s</string>
+    <string name="update_available">Bridge v%1$s — update v%2$s available</string>
+    <string name="update_checking">Checking for updates…</string>
+    <string name="update_up_to_date">Bridge v%1$s is up to date.</string>
+    <string name="update_downloading">Downloading update… %1$d%%</string>
+    <string name="update_verifying">Verifying download…</string>
+    <string name="update_awaiting_confirm">Confirm the system dialog to finish updating.</string>
+    <string name="update_success">Update installed.</string>
+    <string name="update_error">Update failed: %1$s</string>
+    <string name="update_grant_install_permission">Allow “Install unknown apps” for TVWizard Bridge, then press Check for updates again.</string>
 </resources>

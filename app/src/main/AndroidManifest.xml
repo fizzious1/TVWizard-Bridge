@@ -9,6 +9,12 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
+    <!-- One-tap self-updater (Q3 Phase 3.3): required for the PackageInstaller
+         session commit to raise the system "install update?" confirm dialog.
+         On API 26+ the user also grants "Install unknown apps" once —
+         MainActivity routes them to that setting when it's missing. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+
     <!-- tv.list_apps needs to enumerate every installed launcher — on
          Android 11+ that means QUERY_ALL_PACKAGES. We're an app-launcher
          remote, which is one of Play Console's accepted justifications
@@ -90,6 +96,13 @@
                 <action android:name="android.service.notification.NotificationListenerService" />
             </intent-filter>
         </service>
+
+        <!-- PackageInstaller status callbacks for the self-updater. Not
+             exported — the only sender is the system delivering our own
+             PendingIntent (UpdateManager.commitInstall). -->
+        <receiver
+            android:name=".UpdateReceiver"
+            android:exported="false" />
 
         <receiver
             android:name=".BootReceiver"

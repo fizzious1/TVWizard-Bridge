@@ -1,6 +1,8 @@
 package ai.djwizard.tvbridge
 
 import android.content.Intent
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.view.View
@@ -12,19 +14,23 @@ import kotlinx.coroutines.launch
 import ai.djwizard.tvbridge.databinding.ActivityMainBinding
 
 // MainActivity renders the bridge's state as published by
-// TVAccessibilityService.state. It never talks to the network directly —
-// everything network-side lives in the service, which stays alive after the
-// activity goes away.
+// TVAccessibilityService.state. Pairing/command networking lives in the
+// service, which stays alive after the activity goes away; the one exception
+// is the user-initiated self-updater (UpdateManager), which is activity-driven
+// on purpose — it must work even before accessibility is granted, and a
+// download that dies with the screen is fine.
 class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
     private lateinit var config: ConfigStore
+    private lateinit var updater: UpdateManager
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
         config = ConfigStore(applicationContext)
+        updater = UpdateManager(applicationContext)
 
         binding.primaryButton.setOnClickListener {
             when (TVAccessibilityService.state.value) {
@@ -39,11 +45,37 @@ class MainActivity : AppCompatActivity() {
             TVAccessibilityService.get()?.beginPairing()
         }
 
+        binding.updateButton.setOnClickListener { startUpdateFlow() }
+
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
-                TVAccessibilityService.state.collect { render(it) }
+                launch { TVAccessibilityService.state.collect { render(it) } }
+                launch { UpdateManager.state.collect { renderUpdate(it) } }
             }
         }
+
+        // Passive staleness hint: one manifest probe per activity creation.
+        // Errors are swallowed inside checkQuietly — pairing UX comes first.
+        lifecycleScope.launch { updater.checkQuietly() }
+    }
+
+    // startUpdateFlow gates on the API 26+ "Install unknown apps" grant before
+    // downloading anything: without it the PackageInstaller commit would fail
+    // after the download instead of before it.
+    private fun startUpdateFlow() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+            !packageManager.canRequestPackageInstalls()
+        ) {
+            binding.updateStatusText.text = getString(R.string.update_grant_install_permission)
+            startActivity(
+                Intent(
+                    Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                    Uri.parse("package:$packageName"),
+                )
+            )
+            return
+        }
+        lifecycleScope.launch { updater.checkAndInstall() }
     }
 
     private fun render(state: BridgeState) {
@@ -96,6 +128,27 @@ class MainActivity : AppCompatActivity() {
                 binding.primaryButton.visibility = View.VISIBLE
                 binding.resetButton.visibility = View.VISIBLE
             }
+        }
+    }
+
+    // renderUpdate drives the self-updater's dedicated row (button + status
+    // line) — independent of the bridge-state rendering above so an update is
+    // reachable from every bridge state.
+    private fun renderUpdate(state: UpdateState) {
+        binding.updateButton.isEnabled =
+            state is UpdateState.Idle || state is UpdateState.UpToDate || state is UpdateState.Error
+        binding.updateStatusText.text = when (state) {
+            is UpdateState.Idle ->
+                state.availableVersion
+                    ?.let { getString(R.string.update_available, BuildConfig.VERSION_NAME, it) }
+                    ?: getString(R.string.update_idle_version, BuildConfig.VERSION_NAME)
+            UpdateState.Checking -> getString(R.string.update_checking)
+            UpdateState.UpToDate -> getString(R.string.update_up_to_date, BuildConfig.VERSION_NAME)
+            is UpdateState.Downloading -> getString(R.string.update_downloading, state.percent)
+            UpdateState.Verifying -> getString(R.string.update_verifying)
+            UpdateState.AwaitingConfirm -> getString(R.string.update_awaiting_confirm)
+            UpdateState.Success -> getString(R.string.update_success)
+            is UpdateState.Error -> getString(R.string.update_error, state.message)
         }
     }
 
